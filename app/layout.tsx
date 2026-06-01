@@ -31,6 +31,9 @@ export const metadata: Metadata = {
   alternates: {
     canonical: 'https://dvf.tkoidra.com',
   },
+  verification: {
+    google: '-4qm4cLQ2hPYqh23O0cc_IKeevJbhrlb1-YNfZQWgtc',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
