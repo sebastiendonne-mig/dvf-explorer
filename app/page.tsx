@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import Link from 'next/link';
 
 interface ChatMessage {
   id: string;
@@ -383,6 +384,14 @@ export default function Home() {
       {/* ══ FOOTER ══ */}
       <footer className="footer">
         <p className="footer-text">Données DVF · DGFiP · Décalage de mise à jour ~6 mois</p>
+        <p style={{ marginTop: '0.5rem' }}>
+          <Link href="/mentions-legales" style={{ fontSize: '0.8125rem', color: '#94a3b8', textDecoration: 'none' }}
+            onMouseOver={e => (e.currentTarget.style.color = '#2d6a4f')}
+            onMouseOut={e => (e.currentTarget.style.color = '#94a3b8')}
+          >
+            Mentions légales
+          </Link>
+        </p>
       </footer>
 
     </div>

@@ -360,6 +360,15 @@ body {
   color: var(--gray-900);
 }
 
+/* ── Mentions légales ── */
+.ml-link {
+  color: #2d6a4f;
+  text-decoration: none;
+}
+.ml-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
