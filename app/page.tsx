@@ -219,7 +219,7 @@ export default function Home() {
                   onClick={() => { setShowSug(false); handleSearch(input); }}
                   disabled={isLoading || !input.trim()}
                   style={{
-                    backgroundColor: '#1a5c38',
+                    backgroundColor: '#2d6a4f',
                     color: 'white',
                     border: 'none',
                     borderRadius: '9999px',

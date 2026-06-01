@@ -9,21 +9,24 @@ import {
 
 export const maxDuration = 60;
 
-const systemPrompt = `Tu es un agent DVF. Règles strictes :
+const systemPrompt = `Tu es un agent DVF. RÈGLE ABSOLUE : n'écris AUCUN texte avant d'avoir exécuté les deux outils — appelle-les directement.
 
+Étapes :
 1. Appelle \`geocode_address\` avec l'adresse fournie.
-2. Si le département est 57, 67, 68 ou 976 : réponds uniquement "Données DVF non disponibles pour ce département (Alsace-Moselle / Mayotte)."
-3. Appelle \`fetch_dvf_data\` avec lat, lon, insee, dept, housenumber.
-4. Réponds UNIQUEMENT dans ce format, rien d'autre :
+2. Si le département est 57, 67, 68 ou 976 : réponds "Données DVF non disponibles pour ce département (Alsace-Moselle / Mayotte)."
+3. Appelle \`fetch_dvf_data\` avec lat, lon, insee, dept, housenumber, street.
+4. Réponds UNIQUEMENT dans ce format exact, rien d'autre :
 
 Si fallback=false :
 📍 {label géocodé}
+*Résultats dans un rayon de {radius}m*
 
 ### {YYYY}
 - {JJ/MM/AAAA} — {adresse_numero} {adresse_nom_voie} · {type_local} {nombre_pieces_principales}p · {surface_reelle_bati}m² · {valeur_fonciere} € · {prix_m2} €/m²
 
 Si fallback=true :
 📍 {label géocodé}
+*Résultats dans un rayon de {radius}m*
 
 Aucune transaction trouvée au n°{housenumber}, voici les plus proches :
 
@@ -51,7 +54,7 @@ export async function POST(req: Request) {
       tools: {
         geocode_address: tool({
           description:
-            "Convertit une adresse textuelle en coordonnées GPS via l'API Adresse française. Retourne latitude, longitude, code INSEE et label.",
+            "Convertit une adresse textuelle en coordonnées GPS via l'API Adresse française. Retourne latitude, longitude, code INSEE, label et nom de voie.",
           inputSchema: z.object({
             address: z
               .string()
@@ -99,6 +102,7 @@ export async function POST(req: Request) {
                 label: feat.properties.label,
                 postcode: feat.properties.postcode,
                 housenumber: (feat.properties.housenumber as string | undefined) ?? null,
+                street: (feat.properties.street as string | undefined) ?? null,
               };
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Erreur inconnue';
@@ -109,15 +113,19 @@ export async function POST(req: Request) {
 
         fetch_dvf_data: tool({
           description:
-            'Récupère les transactions DVF depuis les fichiers CSV statiques data.gouv.fr, filtre par proximité (200m), déduplique par mutation.',
+            'Récupère les transactions DVF depuis les fichiers CSV statiques data.gouv.fr. Rayon adaptatif : 50m si housenumber présent, 150m sinon, retry 300m si aucun résultat. Filtre sur numéro ET nom de voie normalisé.',
           inputSchema: z.object({
             lat:         z.number().min(-90).max(90).describe('Latitude du point'),
             lon:         z.number().min(-180).max(180).describe('Longitude du point'),
             insee:       z.string().describe('Code INSEE commune (5 chars) retourné par geocode_address'),
             dept:        z.string().describe('Code département retourné par geocode_address'),
-            housenumber: z.string().nullable().describe('Numéro de rue retourné par geocode_address (ex: "38"), null si absent'),
+            housenumber: z.string().nullable().describe('Numéro de rue retourné par geocode_address (ex: "21"), null si absent'),
+            street:      z.string().nullable().describe('Nom de voie retourné par geocode_address (ex: "Rue Pierre Semard"), null si absent'),
           }),
-          execute: async ({ lat, lon, insee, dept, housenumber }: { lat: number; lon: number; insee: string; dept: string; housenumber: string | null }) => {
+          execute: async ({ lat, lon, insee, dept, housenumber, street }: {
+            lat: number; lon: number; insee: string; dept: string;
+            housenumber: string | null; street: string | null;
+          }) => {
             function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
               const R = 6_371_000;
               const φ1 = lat1 * Math.PI / 180;
@@ -140,6 +148,17 @@ export async function POST(req: Request) {
               });
             }
 
+            // Normalize voie: uppercase, strip accents, remove generic type words
+            function normalizeVoie(s: string): string {
+              return s
+                .toUpperCase()
+                .normalize('NFD').replace(/[̀-ͯ]/g, '')
+                .replace(/\b(RUE|AVENUE|AV|BOULEVARD|BD|BLVD|CHEMIN|CHE|IMPASSE|IMP|ALLEE|ROUTE|RTE|PLACE|PL|PASSAGE|SQUARE|VOIE|CITE|DOMAINE|HAMEAU|LOTISSEMENT|LOT|VILLA|RESIDENCE|RES|SENTE|TRAVERSE|TRAVERSE)\b/g, '')
+                .replace(/[^A-Z0-9\s]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            }
+
             // Overseas departments (971–974) need 3-char dept in URL path
             const urlDept = insee.startsWith('97') ? insee.substring(0, 3) : dept;
             const BASE = 'https://files.data.gouv.fr/geo-dvf/2025-12/csv';
@@ -153,43 +172,60 @@ export async function POST(req: Request) {
               return parseCSV(text);
             }
 
-            try {
-              const allRows = (await Promise.all(
-                [2021, 2022, 2023, 2024, 2025].map(fetchYear)
-              )).flat();
+            const PRIORITY: Record<string, number> = {
+              'Appartement': 2, 'Maison': 2,
+              'Local industriel. commercial ou assimilé': 1,
+            };
 
-              if (allRows.length === 0) return { count: 0, transactions: [] };
-
-              // Filter by proximity then deduplicate by id_mutation,
-              // keeping the most meaningful local (Appartement/Maison over Dépendance).
-              const PRIORITY: Record<string, number> = { 'Appartement': 2, 'Maison': 2, 'Local industriel. commercial ou assimilé': 1 };
+            function filterAndDedup(rows: Record<string, string>[], radius: number) {
               const byMutation = new Map<string, Record<string, string>>();
-
-              for (const r of allRows) {
+              for (const r of rows) {
                 const rLat = parseFloat(r.latitude);
                 const rLon = parseFloat(r.longitude);
                 if (isNaN(rLat) || isNaN(rLon)) continue;
-                if (haversine(lat, lon, rLat, rLon) >= 200) continue;
-
+                if (haversine(lat, lon, rLat, rLon) >= radius) continue;
                 const id = r.id_mutation;
                 const existing = byMutation.get(id);
                 const pNew = PRIORITY[r.type_local ?? ''] ?? 0;
                 const pOld = existing ? (PRIORITY[existing.type_local ?? ''] ?? 0) : -1;
                 if (pNew > pOld) byMutation.set(id, r);
               }
+              return [...byMutation.values()];
+            }
 
-              if (byMutation.size === 0) return { count: 0, transactions: [], fallback: false };
+            try {
+              const allRows = (await Promise.all(
+                [2021, 2022, 2023, 2024, 2025].map(fetchYear)
+              )).flat();
 
-              let candidates = [...byMutation.values()];
+              if (allRows.length === 0) return { count: 0, transactions: [], radius: 0 };
+
+              // Adaptive radius
+              const initialRadius = housenumber ? 50 : 150;
+              let candidates = filterAndDedup(allRows, initialRadius);
+              let usedRadius = initialRadius;
+
+              if (candidates.length === 0) {
+                candidates = filterAndDedup(allRows, 300);
+                usedRadius = 300;
+              }
+
+              if (candidates.length === 0) return { count: 0, transactions: [], fallback: false, radius: usedRadius };
+
               let fallback = false;
 
-              // Filter by exact housenumber when available
               if (housenumber) {
-                // Normalize: extract numeric prefix to handle "38B" → "38"
                 const numericHN = housenumber.match(/^\d+/)?.[0] ?? housenumber;
-                const exact = candidates.filter(
-                  r => r.adresse_numero === housenumber || r.adresse_numero === numericHN
-                );
+                const normalizedSearchStreet = street ? normalizeVoie(street) : '';
+
+                const exact = candidates.filter(r => {
+                  const numMatch = r.adresse_numero === housenumber || r.adresse_numero === numericHN;
+                  if (!numMatch) return false;
+                  if (!normalizedSearchStreet) return true;
+                  const dvfStreet = normalizeVoie(r.adresse_nom_voie ?? '');
+                  return dvfStreet.includes(normalizedSearchStreet) || normalizedSearchStreet.includes(dvfStreet);
+                });
+
                 if (exact.length > 0) {
                   candidates = exact;
                 } else {
@@ -216,7 +252,7 @@ export async function POST(req: Request) {
                   adresse_nom_voie:          r.adresse_nom_voie          || null,
                 }));
 
-              return { count: transactions.length, transactions, fallback, housenumber };
+              return { count: transactions.length, transactions, fallback, housenumber, radius: usedRadius };
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Erreur inconnue';
               throw new Error(`Récupération DVF échouée: ${message}`);
