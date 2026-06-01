@@ -37,14 +37,63 @@ function renderMarkdown(content: string): React.ReactNode[] {
   });
 }
 
+/* ── Shared search pill (full + compact) ── */
+const PILL_WRAP: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  backgroundColor: 'white',
+  borderRadius: '9999px',
+  width: '100%',
+};
+
+const PILL_INPUT: React.CSSProperties = {
+  flex: 1,
+  border: 'none',
+  outline: 'none',
+  backgroundColor: 'transparent',
+  color: '#1a1a1a',
+  fontFamily: 'inherit',
+  minWidth: 0,
+  cursor: 'text',
+};
+
+function pillBtn(disabled: boolean): React.CSSProperties {
+  return {
+    backgroundColor: '#2d6a4f',
+    color: 'white',
+    border: 'none',
+    borderRadius: '9999px',
+    fontWeight: '600',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    whiteSpace: 'nowrap',
+    opacity: disabled ? 0.6 : 1,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexShrink: 0,
+  };
+}
+
+const DROPDOWN: React.CSSProperties = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  right: 0,
+  marginTop: '8px',
+  backgroundColor: 'white',
+  borderRadius: '16px',
+  boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+  zIndex: 1000,
+  overflow: 'hidden',
+};
+
 /* ── Page ── */
 export default function Home() {
-  const [messages, setMessages]     = useState<ChatMessage[]>([]);
-  const [input, setInput]           = useState('');
-  const [isLoading, setIsLoading]   = useState(false);
-  const [lastAddress, setLastAddress] = useState('');
+  const [messages, setMessages]       = useState<ChatMessage[]>([]);
+  const [input, setInput]             = useState('');
+  const [isLoading, setIsLoading]     = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [showSug, setShowSug]       = useState(false);
+  const [showSug, setShowSug]         = useState(false);
 
   const inputRef    = useRef<HTMLInputElement>(null);
   const bottomRef   = useRef<HTMLDivElement>(null);
@@ -61,7 +110,6 @@ export default function Home() {
     if (!hasContent) inputRef.current?.focus();
   }, [hasContent]);
 
-  /* Close dropdown on outside click */
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
@@ -103,33 +151,30 @@ export default function Home() {
   function resetAll() {
     setMessages([]);
     setInput('');
-    setLastAddress('');
     setSuggestions([]);
     setShowSug(false);
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
+  /* Always replaces results (fresh search each time) */
   const handleSearch = useCallback(async (address: string) => {
     if (isLoading || !address.trim()) return;
     setIsLoading(true);
     setShowSug(false);
     setSuggestions([]);
-    setLastAddress(address.trim());
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: address.trim(),
     };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setInput('');
+    setMessages([userMsg]);
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ messages: [userMsg] }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
 
@@ -169,7 +214,34 @@ export default function Home() {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading]);
+  }, [isLoading]);
+
+  /* ── Shared autocomplete dropdown ── */
+  function Dropdown() {
+    if (!showSug || suggestions.length === 0) return null;
+    return (
+      <div style={DROPDOWN}>
+        {suggestions.map((s, i) => (
+          <div
+            key={i}
+            onClick={() => selectSuggestion(s)}
+            style={{
+              padding: '12px 20px',
+              cursor: 'pointer',
+              fontSize: '15px',
+              color: '#1a1a1a',
+              borderBottom: i < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
+              backgroundColor: 'white',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f5f5f5')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
+          >
+            {s}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -183,14 +255,7 @@ export default function Home() {
               <p className="hero-sub">Base DVF · Données officielles DGFiP</p>
             </div>
             <div ref={wrapRef} style={{ position: 'relative', maxWidth: '700px', width: '100%', margin: '0 auto' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                backgroundColor: 'white',
-                borderRadius: '9999px',
-                padding: '6px 6px 6px 24px',
-                width: '100%',
-              }}>
+              <div style={{ ...PILL_WRAP, padding: '6px 6px 6px 24px' }}>
                 <input
                   ref={inputRef}
                   type="text"
@@ -204,73 +269,18 @@ export default function Home() {
                   disabled={isLoading}
                   autoFocus
                   autoComplete="off"
-                  style={{
-                    flex: 1,
-                    border: 'none',
-                    outline: 'none',
-                    fontSize: '16px',
-                    backgroundColor: 'transparent',
-                    color: '#1a1a1a',
-                    fontFamily: 'inherit',
-                    minWidth: 0,
-                  }}
+                  style={{ ...PILL_INPUT, fontSize: '16px' }}
                 />
                 <button
                   onClick={() => { setShowSug(false); handleSearch(input); }}
                   disabled={isLoading || !input.trim()}
-                  style={{
-                    backgroundColor: '#2d6a4f',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '9999px',
-                    padding: '12px 28px',
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
-                    whiteSpace: 'nowrap',
-                    opacity: isLoading || !input.trim() ? 0.6 : 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
+                  style={{ ...pillBtn(isLoading || !input.trim()), padding: '12px 28px', fontSize: '15px' }}
                 >
                   {isLoading && <span className="spinner" />}
                   Rechercher
                 </button>
               </div>
-              {showSug && suggestions.length > 0 && (
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  marginTop: '8px',
-                  backgroundColor: 'white',
-                  borderRadius: '16px',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-                  zIndex: 1000,
-                  overflow: 'hidden',
-                }}>
-                  {suggestions.map((s, i) => (
-                    <div
-                      key={i}
-                      onClick={() => selectSuggestion(s)}
-                      style={{
-                        padding: '12px 20px',
-                        cursor: 'pointer',
-                        fontSize: '15px',
-                        color: '#1a1a1a',
-                        borderBottom: i < suggestions.length - 1 ? '1px solid #f0f0f0' : 'none',
-                        backgroundColor: 'white',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f5f5f5')}
-                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
-                    >
-                      {s}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <Dropdown />
             </div>
           </div>
         </section>
@@ -280,10 +290,50 @@ export default function Home() {
       {hasContent && (
         <section className="hero hero--compact">
           <div className="hero-inner">
-            <form className="search-bar" onSubmit={e => { e.preventDefault(); resetAll(); }}>
-              <input className="search-input" defaultValue={lastAddress} disabled />
-              <button className="search-btn" type="submit">Nouvelle recherche</button>
-            </form>
+            <div ref={wrapRef} style={{ position: 'relative', maxWidth: '700px', width: '100%', margin: '0 auto' }}>
+              <div style={{ ...PILL_WRAP, padding: '5px 5px 5px 20px', boxShadow: '0 2px 12px rgba(0,0,0,0.18)' }}>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={e => handleInputChange(e.target.value)}
+                  onFocus={e => e.currentTarget.select()}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter')  { e.preventDefault(); setShowSug(false); handleSearch(input); }
+                    if (e.key === 'Escape') { setShowSug(false); }
+                  }}
+                  placeholder="Nouvelle adresse…"
+                  disabled={isLoading}
+                  autoComplete="off"
+                  style={{ ...PILL_INPUT, fontSize: '15px' }}
+                />
+                <button
+                  onClick={() => { setShowSug(false); handleSearch(input); }}
+                  disabled={isLoading || !input.trim()}
+                  style={{ ...pillBtn(isLoading || !input.trim()), padding: '10px 22px', fontSize: '14px' }}
+                >
+                  {isLoading && <span className="spinner" />}
+                  Rechercher
+                </button>
+              </div>
+              <Dropdown />
+            </div>
+            <div style={{ textAlign: 'center', marginTop: '10px' }}>
+              <button
+                onClick={resetAll}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.55)',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  padding: '2px 0',
+                }}
+              >
+                Nouvelle recherche
+              </button>
+            </div>
           </div>
         </section>
       )}
