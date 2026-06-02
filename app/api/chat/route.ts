@@ -262,9 +262,34 @@ export async function POST(req: Request) {
       }
     });
 
-    return result.toTextStreamResponse();
+    // Stream text with error interception: if Anthropic API is overloaded,
+    // send a readable error message instead of silently returning an empty stream.
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of result.textStream) {
+            controller.enqueue(encoder.encode(chunk));
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '';
+          const isOverload = msg.includes('RetryError') || msg.includes('overload') || msg.includes('529') || msg.includes('rate');
+          controller.enqueue(encoder.encode(
+            isOverload
+              ? '⚠️ Service temporairement surchargé. Réessayez dans quelques instants.'
+              : '⚠️ Une erreur est survenue. Réessayez.'
+          ));
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(body, {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
   } catch (error) {
     console.error('API route error:', error);
-    return new Response('Internal server error', { status: 500 });
+    return new Response('⚠️ Erreur serveur. Réessayez.', { status: 500 });
   }
 }

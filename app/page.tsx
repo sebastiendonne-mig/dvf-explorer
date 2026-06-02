@@ -203,13 +203,21 @@ export default function Home() {
           });
         }
       }
+
+      if (!assistantMsg) {
+        setMessages(prev => [...prev, {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: '⚠️ Service temporairement indisponible. Réessayez dans quelques instants.',
+        }]);
+      }
     } catch {
       setMessages(prev => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: 'Erreur lors de la recherche. Vérifiez votre adresse et réessayez.',
+          content: '⚠️ Erreur lors de la recherche. Vérifiez votre adresse et réessayez.',
         },
       ]);
     } finally {
