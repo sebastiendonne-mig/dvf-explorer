@@ -113,7 +113,7 @@ export async function POST(req: Request) {
 
         fetch_dvf_data: tool({
           description:
-            'Récupère les transactions DVF depuis les fichiers CSV statiques data.gouv.fr. Rayon adaptatif : 50m si housenumber présent, 150m sinon, retry 300m si aucun résultat. Filtre sur numéro ET nom de voie normalisé.',
+            'Récupère les transactions DVF depuis les fichiers CSV statiques data.gouv.fr. Rayon adaptatif : 50m si housenumber présent, 150m sinon, retry 300m si aucun résultat. Filtre sur numéro ET nom de voie normalisé. Données disponibles de 2014 à 2025.',
           inputSchema: z.object({
             lat:         z.number().min(-90).max(90).describe('Latitude du point'),
             lon:         z.number().min(-180).max(180).describe('Longitude du point'),
@@ -195,7 +195,7 @@ export async function POST(req: Request) {
 
             try {
               const allRows = (await Promise.all(
-                [2021, 2022, 2023, 2024, 2025].map(fetchYear)
+                [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025].map(fetchYear)
               )).flat();
 
               if (allRows.length === 0) return { count: 0, transactions: [], radius: 0 };

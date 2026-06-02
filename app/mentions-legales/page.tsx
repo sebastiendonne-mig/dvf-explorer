@@ -81,7 +81,7 @@ export default function MentionsLegales() {
             <Row label="Source">
               <Anchor href="https://files.data.gouv.fr/geo-dvf/">files.data.gouv.fr/geo-dvf</Anchor>
             </Row>
-            <Row label="Années disponibles">2021 à 2025</Row>
+            <Row label="Années disponibles">2014 à 2025</Row>
             <Row label="Mise à jour">Annuelle, avec un décalage d&apos;environ 6 mois</Row>
             <Row label="Zones exclues">Alsace-Moselle (57, 67, 68) et Mayotte (976) — régime foncier spécifique</Row>
           </Section>

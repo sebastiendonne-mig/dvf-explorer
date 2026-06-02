@@ -391,7 +391,7 @@ export default function Home() {
 
       {/* ══ FOOTER ══ */}
       <footer className="footer">
-        <p className="footer-text">Données DVF · DGFiP · Décalage de mise à jour ~6 mois</p>
+        <p className="footer-text">Données DVF · DGFiP · 2014–2025 · Décalage ~6 mois</p>
         <p style={{ marginTop: '0.5rem' }}>
           <Link href="/mentions-legales" style={{ fontSize: '0.8125rem', color: '#94a3b8', textDecoration: 'none' }}
             onMouseOver={e => (e.currentTarget.style.color = '#2d6a4f')}
