@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Mentions légales — DVF Explorer',
@@ -45,20 +44,10 @@ function Anchor({ href, children }: { href: string; children: React.ReactNode })
 
 export default function MentionsLegales() {
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
-
-      {/* Header */}
-      <header style={{ background: '#2d6a4f', padding: '1.25rem 1.5rem' }}>
-        <div style={{ maxWidth: '42rem', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Link href="/" className="ml-link" style={{ color: 'white', fontWeight: 700, fontSize: '1rem' }}>
-            ← DVF Explorer
-          </Link>
-          <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem' }}>Mentions légales</span>
-        </div>
-      </header>
+    <div style={{ flex: 1, background: '#f8fafc' }}>
 
       {/* Content */}
-      <main style={{ flex: 1, padding: '3rem 1.5rem 5rem' }}>
+      <main style={{ padding: '3rem 1.5rem 5rem' }}>
         <div style={{ maxWidth: '42rem', margin: '0 auto', background: 'white', borderRadius: '16px', padding: '2.5rem 2rem', boxShadow: '0 1px 8px rgba(0,0,0,0.06)' }}>
 
           <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', marginBottom: '2.25rem', letterSpacing: '-0.02em' }}>
@@ -112,11 +101,6 @@ export default function MentionsLegales() {
 
         </div>
       </main>
-
-      {/* Footer */}
-      <footer style={{ textAlign: 'center', padding: '1.5rem', borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
-        <p style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>Données DVF · DGFiP · Licence Ouverte v2.0</p>
-      </footer>
 
     </div>
   );
