@@ -8,9 +8,9 @@
 ════════════════════════════════════════════════════════ */
 
 :root {
-  --primary:       #2d6a4f;
-  --primary-dark:  #235c43;
-  --primary-xdark: #1a4d38;
+  --primary:       #0D1F40;
+  --primary-dark:  #1A3260;
+  --primary-xdark: #1A3260;
   --off-white:     #F8FAFC;
   --gray-100:      #F1F5F9;
   --gray-200:      #E2E8F0;
@@ -362,7 +362,7 @@ body {
 
 /* ── Mentions légales ── */
 .ml-link {
-  color: #2d6a4f;
+  color: var(--tk-navy);
   text-decoration: none;
 }
 .ml-link:hover {

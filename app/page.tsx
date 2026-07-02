@@ -59,7 +59,7 @@ const PILL_INPUT: React.CSSProperties = {
 
 function pillBtn(disabled: boolean): React.CSSProperties {
   return {
-    backgroundColor: '#2d6a4f',
+    backgroundColor: '#0D1F40',
     color: 'white',
     border: 'none',
     borderRadius: '9999px',
