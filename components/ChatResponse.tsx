@@ -16,19 +16,33 @@ interface ChatResponseProps {
 function renderInline(text: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
   let lastIndex = 0;
-  const boldRegex = /\*\*([^*]+)\*\*/g;
+  const tokenRegex = /\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
   let match;
 
-  while ((match = boldRegex.exec(text)) !== null) {
+  while ((match = tokenRegex.exec(text)) !== null) {
     if (match.index > lastIndex) {
       parts.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, match.index)}</span>);
     }
-    parts.push(
-      <strong key={`b-${match.index}`} className="font-semibold">
-        {match[1]}
-      </strong>
-    );
-    lastIndex = boldRegex.lastIndex;
+    if (match[1] !== undefined) {
+      parts.push(
+        <strong key={`b-${match.index}`} className="font-semibold">
+          {match[1]}
+        </strong>
+      );
+    } else {
+      parts.push(
+        <a
+          key={`a-${match.index}`}
+          href={match[3]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-600 underline underline-offset-2 hover:text-blue-700"
+        >
+          {match[2]}
+        </a>
+      );
+    }
+    lastIndex = tokenRegex.lastIndex;
   }
 
   if (lastIndex < text.length) {
@@ -37,34 +51,90 @@ function renderInline(text: string): React.ReactNode[] {
   return parts;
 }
 
+function splitTableRow(line: string): string[] {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+}
+
+function renderTable(tableLines: string[], key: number): React.ReactNode {
+  const rows = tableLines.map(splitTableRow);
+  const header = rows[0];
+  const body = rows.slice(1).filter(r => !r.every(c => /^:?-+:?$/.test(c)));
+  return (
+    <div key={`table-${key}`} className="overflow-x-auto my-2">
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr>
+            {header.map((h, j) => (
+              <th key={j} className="border-b border-slate-200 py-1.5 pr-3 font-semibold text-slate-600 whitespace-nowrap">
+                {renderInline(h)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((r, ri) => (
+            <tr key={ri}>
+              {r.map((c, j) => (
+                <td key={j} className="border-b border-slate-100 py-1.5 pr-3 align-top">
+                  {renderInline(c)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function renderContent(content: string): React.ReactNode[] {
-  return content.split('\n').map((line, i) => {
+  const lines = content.split('\n');
+  const nodes: React.ReactNode[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.trimStart().startsWith('|')) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trimStart().startsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      i--;
+      nodes.push(renderTable(tableLines, i));
+      continue;
+    }
     if (line.trim() === '---') {
-      return <hr key={i} className="border-slate-200 my-2" />;
+      nodes.push(<hr key={i} className="border-slate-200 my-2" />);
+      continue;
     }
     if (line.startsWith('### ')) {
-      return (
+      nodes.push(
         <p key={i} className="font-semibold text-slate-800 text-sm mt-3 mb-0.5 first:mt-0">
           {renderInline(line.slice(4))}
         </p>
       );
+      continue;
     }
     if (line.startsWith('## ')) {
-      return (
+      nodes.push(
         <p key={i} className="font-bold text-slate-800 text-base mt-3 mb-1 first:mt-0">
           {renderInline(line.slice(3))}
         </p>
       );
+      continue;
     }
     if (line.trim() === '') {
-      return <div key={i} className="h-1.5" />;
+      nodes.push(<div key={i} className="h-1.5" />);
+      continue;
     }
-    return (
+    nodes.push(
       <p key={i} className="leading-relaxed">
         {renderInline(line)}
       </p>
     );
-  });
+  }
+  return nodes;
 }
 
 const AgentAvatar = () => (

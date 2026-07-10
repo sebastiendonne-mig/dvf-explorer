@@ -57,12 +57,26 @@ Règles de formatage :
 INTERDIT : introduction, conclusion, commentaire, tout texte hors format.
 
 RÈGLES POUR LES DEMANDES DE PRIX DE TERRAIN PAR COMMUNE :
-- Si l'utilisateur demande le prix des terrains ou du foncier nu d'une commune entière (pas d'une adresse précise) : appelle \`geocode_address\` puis \`fetch_terrain_stats_commune\` (pas \`fetch_dvf_data\`). Le format ci-dessus ne s'applique pas à ce cas.
-- Utilise "medianPricePerM2" (médiane), jamais une moyenne — plus robuste face aux terrains de tailles très différentes.
-- Si reliable=false (moins de 5 ventes) : affiche la fourchette minPricePerM2–maxPricePerM2 plutôt qu'un chiffre unique, et précise "échantillon faible, à interpréter avec prudence".
-- Pour la catégorie DVF "terrains a bâtir", écris "terrain à bâtir (déclaré à la vente)" et précise systématiquement : "Cette catégorie reflète la déclaration faite au moment de la vente, pas le statut du terrain au titre du PLU." N'emploie jamais d'autre qualificatif sur le droit à bâtir d'un terrain.
-- Groupe l'affichage par catégorie, jamais un tableau mélangeant plusieurs catégories sans distinction (un terrain à bâtir et une terre agricole n'ont pas le même ordre de grandeur de prix/m²).
-- Précise toujours la période couverte et le décalage de mise à jour DGFiP (environ 6 mois).`;
+Si l'utilisateur demande le prix des terrains ou du foncier nu d'une commune entière (pas d'une adresse précise) : appelle \`geocode_address\` puis \`fetch_terrain_stats_commune\` (pas \`fetch_dvf_data\`), puis réponds UNIQUEMENT dans ce format exact :
+
+📍 {label géocodé}
+**Terrains non bâtis vendus — {première année}-{dernière année}** (source DGFiP, mise à jour avec ~6 mois de décalage)
+
+| Catégorie | Année | Prix médian | Ventes |
+|---|---|---|---|
+| {category} | {year} | {medianPricePerM2} €/m² | {count} |
+
+[Vérifier sur la carte DVF officielle](https://app.dvf.etalab.gouv.fr/)
+
+Règles du tableau terrain :
+- Une ligne par groupe de byCategory, dans l'ordre retourné (catégorie, puis année décroissante)
+- Prix médian = medianPricePerM2 (médiane), jamais une moyenne
+- Si reliable=false : remplace le prix médian par "{minPricePerM2}–{maxPricePerM2} €/m² (échantillon faible)"
+- Arrondis les prix à l'entier si ≥ 10 €/m², à 2 décimales sinon
+- Affiche la catégorie "terrains a bâtir" comme "terrain à bâtir (déclaré à la vente)" et, si elle est présente, ajoute juste après le tableau la ligne : "Note : « terrain à bâtir » reflète la déclaration faite au moment de la vente, pas le statut du terrain au titre du PLU."
+- Si count=0 : "Aucune vente de terrain nu trouvée pour cette commune sur la période." puis le lien
+- Le lien final vers app.dvf.etalab.gouv.fr est le SEUL lien de la réponse — jamais de lien par transaction
+INTERDIT : introduction, conclusion, commentaire, tout texte hors format.`;
 
 export async function POST(req: Request) {
   try {
