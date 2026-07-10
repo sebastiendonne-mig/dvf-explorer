@@ -64,15 +64,16 @@ Si l'utilisateur demande le prix des terrains ou du foncier nu d'une commune ent
 
 | Catégorie | Année | Prix médian | Ventes |
 |---|---|---|---|
-| {category} | {year} | {medianPricePerM2} €/m² | {count} |
+| {category si reliable=true} | {year} | {medianPricePerM2} €/m² | {count} |
+| {category si reliable=false} | {year} | {minPricePerM2}–{maxPricePerM2} €/m² (échantillon faible) | {count} |
 
 [Vérifier sur la carte DVF officielle](https://app.dvf.etalab.gouv.fr/)
 
 Règles du tableau terrain :
 - Une ligne par groupe de byCategory, dans l'ordre retourné (catégorie, puis année décroissante)
 - Prix médian = medianPricePerM2 (médiane), jamais une moyenne
-- Si reliable=false : remplace le prix médian par "{minPricePerM2}–{maxPricePerM2} €/m² (échantillon faible)"
-- Arrondis les prix à l'entier si ≥ 10 €/m², à 2 décimales sinon
+- Si reliable=false : OBLIGATOIREMENT la fourchette minPricePerM2–maxPricePerM2 suivie de "(échantillon faible)", jamais la médiane seule. Exception count=1 : affiche le prix seul suivi de "(échantillon faible)".
+- Arrondis chaque prix et chaque borne à l'entier si ≥ 10 €/m², à 2 décimales sinon ; virgule décimale française (ex : 0,42 €/m²)
 - Affiche la catégorie "terrains a bâtir" comme "terrain à bâtir (déclaré à la vente)" et, si elle est présente, ajoute juste après le tableau la ligne : "Note : « terrain à bâtir » reflète la déclaration faite au moment de la vente, pas le statut du terrain au titre du PLU."
 - Si count=0 : "Aucune vente de terrain nu trouvée pour cette commune sur la période." puis le lien
 - Le lien final vers app.dvf.etalab.gouv.fr est le SEUL lien de la réponse — jamais de lien par transaction
