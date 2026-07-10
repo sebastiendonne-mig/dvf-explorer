@@ -9,7 +9,21 @@ import {
 
 export const maxDuration = 60;
 
-const systemPrompt = `Tu es un agent DVF. RÈGLE ABSOLUE : n'écris AUCUN texte avant d'avoir exécuté les deux outils — appelle-les directement.
+// Shared between fetch_dvf_data and fetch_terrain_stats_commune.
+// Naive comma split: geo-dvf CSVs contain no quoted fields (verified on real files).
+function parseCSV(text: string): Record<string, string>[] {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const values = line.split(',');
+    const row: Record<string, string> = {};
+    headers.forEach((h, i) => { row[h] = (values[i] ?? '').trim(); });
+    return row;
+  });
+}
+
+const systemPrompt = `Tu es un agent DVF. RÈGLE ABSOLUE : n'écris AUCUN texte avant d'avoir exécuté les outils nécessaires — appelle-les directement.
 
 Étapes :
 1. Appelle \`geocode_address\` avec l'adresse fournie.
@@ -40,7 +54,15 @@ Règles de formatage :
 - prix_m2 = round(valeur_fonciere / surface_reelle_bati) — omets si surface nulle ou 0
 - Omets "Np ·" si nombre_pieces_principales est nul ou 0
 - Si count=0 : "Aucune transaction trouvée dans ce périmètre."
-INTERDIT : introduction, conclusion, commentaire, tout texte hors format.`;
+INTERDIT : introduction, conclusion, commentaire, tout texte hors format.
+
+RÈGLES POUR LES DEMANDES DE PRIX DE TERRAIN PAR COMMUNE :
+- Si l'utilisateur demande le prix des terrains ou du foncier nu d'une commune entière (pas d'une adresse précise) : appelle \`geocode_address\` puis \`fetch_terrain_stats_commune\` (pas \`fetch_dvf_data\`). Le format ci-dessus ne s'applique pas à ce cas.
+- Utilise "medianPricePerM2" (médiane), jamais une moyenne — plus robuste face aux terrains de tailles très différentes.
+- Si reliable=false (moins de 5 ventes) : affiche la fourchette minPricePerM2–maxPricePerM2 plutôt qu'un chiffre unique, et précise "échantillon faible, à interpréter avec prudence".
+- Pour la catégorie DVF "terrains a bâtir", écris "terrain à bâtir (déclaré à la vente)" et précise systématiquement : "Cette catégorie reflète la déclaration faite au moment de la vente, pas le statut du terrain au titre du PLU." N'emploie jamais d'autre qualificatif sur le droit à bâtir d'un terrain.
+- Groupe l'affichage par catégorie, jamais un tableau mélangeant plusieurs catégories sans distinction (un terrain à bâtir et une terre agricole n'ont pas le même ordre de grandeur de prix/m²).
+- Précise toujours la période couverte et le décalage de mise à jour DGFiP (environ 6 mois).`;
 
 export async function POST(req: Request) {
   try {
@@ -134,18 +156,6 @@ export async function POST(req: Request) {
               const Δλ = (lon2 - lon1) * Math.PI / 180;
               const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
               return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            }
-
-            function parseCSV(text: string): Record<string, string>[] {
-              const lines = text.split('\n').filter(l => l.trim());
-              if (lines.length < 2) return [];
-              const headers = lines[0].split(',').map(h => h.trim());
-              return lines.slice(1).map(line => {
-                const values = line.split(',');
-                const row: Record<string, string> = {};
-                headers.forEach((h, i) => { row[h] = (values[i] ?? '').trim(); });
-                return row;
-              });
             }
 
             // Normalize voie: uppercase, strip accents, remove generic type words
@@ -256,6 +266,163 @@ export async function POST(req: Request) {
             } catch (error) {
               const message = error instanceof Error ? error.message : 'Erreur inconnue';
               throw new Error(`Récupération DVF échouée: ${message}`);
+            }
+          }
+        }),
+
+        fetch_terrain_stats_commune: tool({
+          description:
+            "Récupère les statistiques de prix des terrains non bâtis (terrains nus) vendus dans une commune entière, sans filtre par adresse, groupées par catégorie de nature de culture DGFiP et par année. Les catégories disponibles varient selon la commune et sont extraites dynamiquement des données réelles.",
+          inputSchema: z.object({
+            insee:    z.string().describe('Code INSEE commune (5 chars) retourné par geocode_address'),
+            dept:     z.string().describe('Code département retourné par geocode_address'),
+            yearFrom: z.number().optional().describe('Année de début (défaut: 2021, min: 2014)'),
+            yearTo:   z.number().optional().describe('Année de fin (défaut: 2025)'),
+            category: z.string().nullable().optional().describe('Filtrer sur une catégorie nature_culture précise (ex: "terrains a bâtir"). Null = toutes catégories.'),
+          }),
+          execute: async ({ insee, dept, yearFrom, yearTo, category }: {
+            insee: string; dept: string; yearFrom?: number; yearTo?: number; category?: string | null;
+          }) => {
+            // Overseas departments (971–974) need 3-char dept in URL path
+            const urlDept = insee.startsWith('97') ? insee.substring(0, 3) : dept;
+            const BASE = 'https://files.data.gouv.fr/geo-dvf/2025-12/csv';
+            const startYear = Math.max(yearFrom ?? 2021, 2014);
+            const endYear = Math.min(yearTo ?? 2025, 2025);
+            const years = Array.from(
+              { length: Math.max(endYear - startYear + 1, 0) },
+              (_, i) => startYear + i
+            );
+
+            async function fetchYear(year: number): Promise<Record<string, string>[]> {
+              const url = `${BASE}/${year}/communes/${urlDept}/${insee}.csv`;
+              const res = await fetch(url, { headers: { Accept: 'text/csv,*/*' } });
+              if (!res.ok) return [];
+              const text = await res.text();
+              if (text.trimStart().startsWith('<?xml')) return [];
+              return parseCSV(text);
+            }
+
+            function median(arr: number[]): number {
+              const sorted = [...arr].sort((a, b) => a - b);
+              const mid = Math.floor(sorted.length / 2);
+              return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+            }
+
+            const MIN_SAMPLE_RELIABLE = 5;
+            const MAX_TRANSACTIONS_PER_GROUP = 10;
+
+            try {
+              const allRows = (await Promise.all(years.map(fetchYear))).flat();
+
+              // valeur_fonciere is the TOTAL price of the whole mutation, repeated
+              // on every row, and a house sale also carries bare type_local rows
+              // for its land. Stats must therefore be computed per mutation:
+              // keep only sales where no row has a type_local at all.
+              const byMutation = new Map<string, Record<string, string>[]>();
+              for (const r of allRows) {
+                if (r.nature_mutation !== 'Vente') continue;
+                const rows = byMutation.get(r.id_mutation);
+                if (rows) rows.push(r); else byMutation.set(r.id_mutation, [r]);
+              }
+
+              type Sale = {
+                date_mutation: string;
+                year: string;
+                valeur_fonciere: number;
+                surface_terrain: number;
+                prix_m2: number;
+                category: string;
+                natures: string[];
+                parcelles: string[];
+                adresse_nom_voie: string | null;
+              };
+              const sales: Sale[] = [];
+              const allCategories = new Set<string>();
+
+              for (const rows of byMutation.values()) {
+                if (rows.some(r => r.type_local && r.type_local.trim() !== '')) continue;
+                const valeur = parseFloat(rows[0].valeur_fonciere);
+                if (!(valeur > 0)) continue;
+
+                // A parcelle can appear once per subdivision fiscale, and the same
+                // subdivision can repeat across dispositions: dedup on the full triplet.
+                const seen = new Set<string>();
+                const surfaceByNature = new Map<string, number>();
+                const parcelles = new Set<string>();
+                let totalSurface = 0;
+                for (const r of rows) {
+                  const surface = parseFloat(r.surface_terrain);
+                  if (!(surface > 0)) continue;
+                  const key = `${r.id_parcelle}|${r.nature_culture}|${r.surface_terrain}`;
+                  if (seen.has(key)) continue;
+                  seen.add(key);
+                  totalSurface += surface;
+                  const nature = r.nature_culture || 'Non renseigné';
+                  surfaceByNature.set(nature, (surfaceByNature.get(nature) ?? 0) + surface);
+                  parcelles.add(r.id_parcelle);
+                }
+                if (totalSurface <= 0) continue;
+
+                const natures = [...surfaceByNature.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([nature]) => nature);
+                natures.forEach(n => allCategories.add(n));
+
+                sales.push({
+                  date_mutation: rows[0].date_mutation,
+                  year: (rows[0].date_mutation ?? '').slice(0, 4),
+                  valeur_fonciere: valeur,
+                  surface_terrain: totalSurface,
+                  prix_m2: Math.round((valeur / totalSurface) * 100) / 100,
+                  category: natures[0], // dominant nature_culture by surface
+                  natures,
+                  parcelles: [...parcelles],
+                  adresse_nom_voie: rows.find(r => r.adresse_nom_voie)?.adresse_nom_voie ?? null,
+                });
+              }
+
+              const availableCategories = [...allCategories].sort();
+              const filtered = category ? sales.filter(s => s.category === category) : sales;
+
+              if (filtered.length === 0) {
+                return { count: 0, availableCategories, byCategory: [] };
+              }
+
+              // Group by dominant category + year
+              type Group = { category: string; year: string; sales: Sale[] };
+              const groups = new Map<string, Group>();
+              for (const s of filtered) {
+                const key = `${s.category}__${s.year}`;
+                if (!groups.has(key)) {
+                  groups.set(key, { category: s.category, year: s.year, sales: [] });
+                }
+                groups.get(key)!.sales.push(s);
+              }
+
+              const byCategory = [...groups.values()]
+                .sort((a, b) => a.category.localeCompare(b.category) || b.year.localeCompare(a.year))
+                .map(g => {
+                  const prices = g.sales.map(s => s.prix_m2);
+                  return {
+                    category: g.category,
+                    year: g.year,
+                    count: g.sales.length,
+                    reliable: g.sales.length >= MIN_SAMPLE_RELIABLE,
+                    medianPricePerM2: Math.round(median(prices) * 100) / 100,
+                    minPricePerM2: Math.min(...prices),
+                    maxPricePerM2: Math.max(...prices),
+                    medianSurface: Math.round(median(g.sales.map(s => s.surface_terrain))),
+                    transactions: g.sales
+                      .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
+                      .slice(0, MAX_TRANSACTIONS_PER_GROUP)
+                      .map(({ year, category, ...t }) => t),
+                  };
+                });
+
+              return { count: filtered.length, availableCategories, byCategory };
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'Erreur inconnue';
+              throw new Error(`Récupération statistiques terrain échouée: ${message}`);
             }
           }
         })
