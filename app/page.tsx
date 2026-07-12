@@ -282,7 +282,7 @@ export default function Home() {
           <div className="hero-inner">
             <div className="hero-heading">
               <h1>Explorez les transactions immobilières.</h1>
-              <p className="hero-sub">Base DVF · Données officielles DGFiP</p>
+              <p className="hero-sub">Recherchez une adresse ou une commune — ventes immobilières et terrains, données officielles DGFiP</p>
             </div>
             <div ref={wrapRef} style={{ position: 'relative', maxWidth: '700px', width: '100%', margin: '0 auto' }}>
               <div style={{ ...PILL_WRAP, padding: '6px 6px 6px 24px' }}>
@@ -311,6 +311,30 @@ export default function Home() {
                 </button>
               </div>
               <Dropdown />
+              <div style={{ marginTop: '14px', textAlign: 'center', fontSize: '13.5px', color: 'rgba(255,255,255,0.5)' }}>
+                Essayez :{' '}
+                {['10 Rue de la Paix, Paris', 'Terrains à Ollioules'].map((ex, i) => (
+                  <span key={ex}>
+                    {i > 0 && ' · '}
+                    <button
+                      onClick={() => selectSuggestion(ex)}
+                      disabled={isLoading}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        font: 'inherit',
+                        color: 'rgba(255,255,255,0.65)',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        textUnderlineOffset: '3px',
+                      }}
+                    >
+                      {ex}
+                    </button>
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </section>

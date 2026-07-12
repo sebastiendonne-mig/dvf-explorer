@@ -6,7 +6,7 @@ import {
   extractDepartmentFromInsee,
   isDepartmentExcluded
 } from '@/lib/sanitize';
-import { TERRAIN_MARKER } from '@/lib/terrain';
+import { TERRAIN_MARKER, priceUnitFor } from '@/lib/terrain';
 
 export const maxDuration = 60;
 
@@ -332,7 +332,8 @@ export async function POST(req: Request) {
                 year: string;
                 valeur_fonciere: number;
                 surface_terrain: number;
-                prix_m2: number;
+                prix: number;
+                unit: ReturnType<typeof priceUnitFor>;
                 category: string;
                 natures: string[];
                 parcelles: string[];
@@ -370,12 +371,18 @@ export async function POST(req: Request) {
                   .map(([nature]) => nature);
                 natures.forEach(n => allCategories.add(n));
 
+                // Unité selon la catégorie dominante : €/m² en urbain,
+                // €/ha en rural (même calcul, diviseur en hectares)
+                const unit = priceUnitFor(natures[0]);
+                const divisor = unit === '€/ha' ? totalSurface / 10000 : totalSurface;
+
                 sales.push({
                   date_mutation: rows[0].date_mutation,
                   year: (rows[0].date_mutation ?? '').slice(0, 4),
                   valeur_fonciere: valeur,
                   surface_terrain: totalSurface,
-                  prix_m2: Math.round((valeur / totalSurface) * 100) / 100,
+                  prix: Math.round((valeur / divisor) * 100) / 100,
+                  unit,
                   category: natures[0], // dominant nature_culture by surface
                   natures,
                   parcelles: [...parcelles],
@@ -404,20 +411,21 @@ export async function POST(req: Request) {
               const byCategory = [...groups.values()]
                 .sort((a, b) => a.category.localeCompare(b.category) || b.year.localeCompare(a.year))
                 .map(g => {
-                  const prices = g.sales.map(s => s.prix_m2);
+                  const prices = g.sales.map(s => s.prix);
                   return {
                     category: g.category,
                     year: g.year,
+                    unit: g.sales[0].unit,
                     count: g.sales.length,
                     reliable: g.sales.length >= MIN_SAMPLE_RELIABLE,
-                    medianPricePerM2: Math.round(median(prices) * 100) / 100,
-                    minPricePerM2: Math.min(...prices),
-                    maxPricePerM2: Math.max(...prices),
+                    medianPrice: Math.round(median(prices) * 100) / 100,
+                    minPrice: Math.min(...prices),
+                    maxPrice: Math.max(...prices),
                     medianSurface: Math.round(median(g.sales.map(s => s.surface_terrain))),
                     transactions: g.sales
                       .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
                       .slice(0, MAX_TRANSACTIONS_PER_GROUP)
-                      .map(({ year, category, ...t }) => t),
+                      .map(({ year, category, unit, ...t }) => t),
                   };
                 });
 

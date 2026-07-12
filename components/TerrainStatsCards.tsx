@@ -5,7 +5,9 @@ import {
   TerrainStats,
   TerrainGroup,
   TerrainTransaction,
-  fmtPrixM2,
+  PriceUnit,
+  fmtPrix,
+  fmtSurface,
   fmtEuros,
   fmtDate,
   displayCategory,
@@ -25,12 +27,11 @@ const CARD: React.CSSProperties = {
 };
 
 function priceLabel(g: TerrainGroup): string {
-  if (g.reliable) return `${fmtPrixM2(g.medianPricePerM2)} €/m²`;
-  if (g.count === 1) return `${fmtPrixM2(g.medianPricePerM2)} €/m²`;
-  return `${fmtPrixM2(g.minPricePerM2)}–${fmtPrixM2(g.maxPricePerM2)} €/m²`;
+  if (g.reliable || g.count === 1) return `${fmtPrix(g.medianPrice)} ${g.unit}`;
+  return `${fmtPrix(g.minPrice)}–${fmtPrix(g.maxPrice)} ${g.unit}`;
 }
 
-function TransactionList({ transactions }: { transactions: TerrainTransaction[] }) {
+function TransactionList({ transactions, unit }: { transactions: TerrainTransaction[]; unit: PriceUnit }) {
   return (
     <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0 }}>
       {transactions.map((t, i) => (
@@ -44,9 +45,9 @@ function TransactionList({ transactions }: { transactions: TerrainTransaction[] 
           }}
         >
           <span style={{ color: 'var(--gray-700)' }}>{fmtDate(t.date_mutation)}</span>
-          {' · '}{fmtEuros(t.surface_terrain)} m²
+          {' · '}{fmtSurface(t.surface_terrain, unit)}
           {' · '}{fmtEuros(t.valeur_fonciere)} €
-          {' · '}<span style={{ color: 'var(--gray-700)' }}>{fmtPrixM2(t.prix_m2)} €/m²</span>
+          {' · '}<span style={{ color: 'var(--gray-700)' }}>{fmtPrix(t.prix)} {unit}</span>
           {t.adresse_nom_voie ? ` · ${t.adresse_nom_voie}` : ''}
         </li>
       ))}
@@ -57,7 +58,8 @@ function TransactionList({ transactions }: { transactions: TerrainTransaction[] 
 function CategoryCard({ category, groups }: { category: string; groups: TerrainGroup[] }) {
   // Groupes déjà triés par année décroissante par l'API
   const headline = groups.find(g => g.reliable) ?? groups[0];
-  const maxMedian = Math.max(...groups.map(g => g.medianPricePerM2), 1);
+  const unit = groups[0].unit;
+  const maxMedian = Math.max(...groups.map(g => g.medianPrice), 1);
   const transactions = groups
     .flatMap(g => g.transactions)
     .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
@@ -83,7 +85,7 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
         {groups.map(g => (
           <div
             key={g.year}
-            title={`Surface médiane ${fmtEuros(g.medianSurface)} m²`}
+            title={`Surface médiane ${fmtSurface(g.medianSurface, unit)}`}
             style={{ display: 'grid', gridTemplateColumns: '38px minmax(60px, 1fr) auto', alignItems: 'center', gap: '10px' }}
           >
             <span style={{ fontSize: '13px', color: 'var(--gray-500)' }}>{g.year}</span>
@@ -91,7 +93,7 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
               <div
                 style={{
                   height: '100%',
-                  width: `${Math.max((g.medianPricePerM2 / maxMedian) * 100, 2)}%`,
+                  width: `${Math.max((g.medianPrice / maxMedian) * 100, 2)}%`,
                   backgroundColor: BAR_COLOR,
                   opacity: g.reliable ? 1 : 0.35,
                   borderRadius: '0 4px 4px 0',
@@ -114,7 +116,7 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
           <summary style={{ fontSize: '13px', color: 'var(--gray-500)', cursor: 'pointer' }}>
             Voir les {transactions.length} dernières transactions
           </summary>
-          <TransactionList transactions={transactions} />
+          <TransactionList transactions={transactions} unit={unit} />
         </details>
       )}
     </div>
@@ -152,7 +154,8 @@ export function TerrainStatsCards({ stats }: { stats: TerrainStats }) {
 
       <p style={{ fontSize: '12.5px', color: 'var(--gray-400)', lineHeight: 1.55, margin: '14px 0 0' }}>
         Période {period} · Données DVF/DGFiP, mises à jour avec environ 6 mois de décalage ·
-        Prix médians par vente (valeur totale ÷ surface totale) · ⚠ = moins de 5 ventes, à interpréter avec prudence.
+        Prix médians par vente (valeur totale ÷ surface totale), en €/m² pour les catégories urbaines et en €/ha
+        pour les catégories agricoles et forestières · ⚠ = moins de 5 ventes, à interpréter avec prudence.
         {hasTerrainABatir && (
           <>
             <br />

@@ -5,11 +5,30 @@
 // est le JSON des statistiques terrain, destiné au composant dédié.
 export const TERRAIN_MARKER = '@@TERRAIN_STATS@@';
 
+export type PriceUnit = '€/m²' | '€/ha';
+
+// Catégories urbaines/résidentielles : prix affiché en €/m². Toutes les
+// autres natures de culture DGFiP (agricoles, forestières, naturelles)
+// s'expriment en €/ha (1 ha = 10 000 m²), l'unité du marché rural.
+const M2_CATEGORIES = new Set([
+  'terrains a bâtir',
+  "terrains d'agrément",
+  'sols',
+  'jardins',
+  'chemin de fer',
+  'chemins de fer',
+  'Non renseigné',
+]);
+
+export function priceUnitFor(category: string): PriceUnit {
+  return M2_CATEGORIES.has(category) ? '€/m²' : '€/ha';
+}
+
 export interface TerrainTransaction {
   date_mutation: string;
   valeur_fonciere: number;
   surface_terrain: number;
-  prix_m2: number;
+  prix: number;
   natures: string[];
   parcelles: string[];
   adresse_nom_voie: string | null;
@@ -18,11 +37,12 @@ export interface TerrainTransaction {
 export interface TerrainGroup {
   category: string;
   year: string;
+  unit: PriceUnit;
   count: number;
   reliable: boolean;
-  medianPricePerM2: number;
-  minPricePerM2: number;
-  maxPricePerM2: number;
+  medianPrice: number;
+  minPrice: number;
+  maxPrice: number;
   medianSurface: number;
   transactions: TerrainTransaction[];
 }
@@ -33,11 +53,18 @@ export interface TerrainStats {
   byCategory: TerrainGroup[];
 }
 
-// Arrondi affichage : entier si ≥ 10 €/m², 2 décimales sinon (virgule française)
-export function fmtPrixM2(v: number): string {
+// Arrondi affichage : entier si ≥ 10, 2 décimales sinon (virgule française)
+export function fmtPrix(v: number): string {
   return v >= 10
     ? Math.round(v).toLocaleString('fr-FR')
     : v.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Surface : en ha (2 décimales max) pour les catégories rurales, sinon en m²
+export function fmtSurface(m2: number, unit: PriceUnit): string {
+  return unit === '€/ha'
+    ? `${(m2 / 10000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} ha`
+    : `${Math.round(m2).toLocaleString('fr-FR')} m²`;
 }
 
 export function fmtEuros(v: number): string {
