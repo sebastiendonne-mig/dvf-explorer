@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { TERRAIN_MARKER, type TerrainStats } from '@/lib/terrain';
+import { TerrainStatsCards } from '@/components/TerrainStatsCards';
 
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  terrain?: TerrainStats;
 }
 
 /* ── Inline markdown renderer ── */
@@ -209,6 +212,25 @@ export default function Home() {
           role: 'assistant',
           content: '⚠️ Service temporairement indisponible. Réessayez dans quelques instants.',
         }]);
+      } else {
+        // Le flux peut se terminer par @@TERRAIN_STATS@@{json} : on l'extrait
+        // du texte et on le confie au composant dédié
+        const markerIdx = assistantMsg.content.indexOf(TERRAIN_MARKER);
+        if (markerIdx !== -1) {
+          try {
+            assistantMsg.terrain = JSON.parse(
+              assistantMsg.content.slice(markerIdx + TERRAIN_MARKER.length)
+            ) as TerrainStats;
+          } catch {
+            // JSON tronqué : on affiche au moins le texte
+          }
+          assistantMsg.content = assistantMsg.content.slice(0, markerIdx).trimEnd();
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { ...assistantMsg! };
+            return updated;
+          });
+        }
       }
     } catch {
       setMessages(prev => [
@@ -365,8 +387,9 @@ export default function Home() {
               return (
                 <div key={msg.id} className="animate-fade-in">
                   <div className="result-body">
-                    {renderMarkdown(msg.content)}
+                    {renderMarkdown(msg.content.split(TERRAIN_MARKER)[0])}
                   </div>
+                  {msg.terrain && <TerrainStatsCards stats={msg.terrain} />}
                   {i < messages.length - 1 && <hr className="result-sep" />}
                 </div>
               );

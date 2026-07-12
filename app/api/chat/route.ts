@@ -6,6 +6,7 @@ import {
   extractDepartmentFromInsee,
   isDepartmentExcluded
 } from '@/lib/sanitize';
+import { TERRAIN_MARKER } from '@/lib/terrain';
 
 export const maxDuration = 60;
 
@@ -57,27 +58,13 @@ Règles de formatage :
 INTERDIT : introduction, conclusion, commentaire, tout texte hors format.
 
 RÈGLES POUR LES DEMANDES DE PRIX DE TERRAIN PAR COMMUNE :
-Si l'utilisateur demande le prix des terrains ou du foncier nu d'une commune entière (pas d'une adresse précise) : appelle \`geocode_address\` puis \`fetch_terrain_stats_commune\` (pas \`fetch_dvf_data\`), puis réponds UNIQUEMENT dans ce format exact :
+Si l'utilisateur demande le prix des terrains ou du foncier nu d'une commune entière (pas d'une adresse précise) : appelle \`geocode_address\` puis \`fetch_terrain_stats_commune\` (pas \`fetch_dvf_data\`). Les statistiques détaillées (prix par catégorie et par année, note légale, lien officiel) s'affichent automatiquement sous ta réponse via un composant dédié — ne les écris PAS toi-même.
+Réponds UNIQUEMENT :
 
 📍 {label géocodé}
-**Terrains non bâtis vendus — {première année}-{dernière année}** (source DGFiP, mise à jour avec ~6 mois de décalage)
 
-| Catégorie | Année | Prix médian | Ventes |
-|---|---|---|---|
-| {category si reliable=true} | {year} | {medianPricePerM2} €/m² | {count} |
-| {category si reliable=false} | {year} | {minPricePerM2}–{maxPricePerM2} €/m² (échantillon faible) | {count} |
-
-[Vérifier sur la carte DVF officielle](https://app.dvf.etalab.gouv.fr/)
-
-Règles du tableau terrain :
-- Une ligne par groupe de byCategory, dans l'ordre retourné (catégorie, puis année décroissante)
-- Prix médian = medianPricePerM2 (médiane), jamais une moyenne
-- Si reliable=false : OBLIGATOIREMENT la fourchette minPricePerM2–maxPricePerM2 suivie de "(échantillon faible)", jamais la médiane seule. Exception count=1 : affiche le prix seul suivi de "(échantillon faible)".
-- Arrondis chaque prix et chaque borne à l'entier si ≥ 10 €/m², à 2 décimales sinon ; virgule décimale française (ex : 0,42 €/m²)
-- Affiche la catégorie "terrains a bâtir" comme "terrain à bâtir (déclaré à la vente)" et, si elle est présente, ajoute juste après le tableau la ligne : "Note : « terrain à bâtir » reflète la déclaration faite au moment de la vente, pas le statut du terrain au titre du PLU."
-- Si count=0 : "Aucune vente de terrain nu trouvée pour cette commune sur la période." puis le lien
-- Le lien final vers app.dvf.etalab.gouv.fr est le SEUL lien de la réponse — jamais de lien par transaction
-INTERDIT : introduction, conclusion, commentaire, tout texte hors format.`;
+Si count=0, ajoute une seconde ligne : "Aucune vente de terrain nu trouvée pour cette commune sur la période."
+INTERDIT : tableau, chiffres, résumé, commentaire — aucune autre ligne.`;
 
 export async function POST(req: Request) {
   try {
@@ -452,6 +439,16 @@ export async function POST(req: Request) {
         try {
           for await (const chunk of result.textStream) {
             controller.enqueue(encoder.encode(chunk));
+          }
+          // Après le texte : si le tool terrain a été appelé, on ajoute son
+          // résultat JSON derrière un marqueur — le frontend le retire du
+          // texte affiché et le passe au composant TerrainStatsCards.
+          const steps = await result.steps;
+          const terrain = steps
+            .flatMap(s => s.toolResults)
+            .find(r => r.toolName === 'fetch_terrain_stats_commune');
+          if (terrain) {
+            controller.enqueue(encoder.encode('\n' + TERRAIN_MARKER + JSON.stringify(terrain.output)));
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : '';
