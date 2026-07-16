@@ -62,6 +62,10 @@ export async function POST(req: Request) {
       system: systemPrompt,
       messages,
       stopWhen: stepCountIs(5),
+      // Borné sous le maxDuration (60 s) : mieux vaut un message d'erreur
+      // propre qu'un 504 brut quand l'API Anthropic traîne (cause du 16/07)
+      maxRetries: 1,
+      abortSignal: AbortSignal.timeout(45_000),
       tools: {
         geocode_address: tool({
           description:
@@ -274,7 +278,10 @@ export async function POST(req: Request) {
           }) => {
             const { startYear, endYear } = clampYears(yearFrom, yearTo);
             const MIN_SAMPLE_RELIABLE = 5;
-            const MAX_TRANSACTIONS_PER_GROUP = 10;
+            // 5 tx/groupe suffisent à l'aperçu (le bouton « Voir toutes les
+            // transactions » sert la liste complète) et divisent par ~2 les
+            // tokens ingérés par le modèle sur les grosses communes
+            const MAX_TRANSACTIONS_PER_GROUP = 5;
 
             try {
               // Logique partagée avec /api/terrain-transactions (lib/terrain-data)
@@ -319,7 +326,7 @@ export async function POST(req: Request) {
                     transactions: g.sales
                       .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
                       .slice(0, MAX_TRANSACTIONS_PER_GROUP)
-                      .map(({ year, category, unit, ...t }) => t),
+                      .map(({ year, category, unit, natures, parcelles, ...t }) => t),
                   };
                 });
 
@@ -360,11 +367,14 @@ export async function POST(req: Request) {
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : '';
+          const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
           const isOverload = msg.includes('RetryError') || msg.includes('overload') || msg.includes('529') || msg.includes('rate');
           controller.enqueue(encoder.encode(
-            isOverload
-              ? '⚠️ Service temporairement surchargé. Réessayez dans quelques instants.'
-              : '⚠️ Une erreur est survenue. Réessayez.'
+            isTimeout
+              ? '⚠️ La réponse a pris trop de temps. Réessayez dans quelques instants.'
+              : isOverload
+                ? '⚠️ Service temporairement surchargé. Réessayez dans quelques instants.'
+                : '⚠️ Une erreur est survenue. Réessayez.'
           ));
         } finally {
           controller.close();

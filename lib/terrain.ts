@@ -36,8 +36,6 @@ export interface TerrainTransaction {
   valeur_fonciere: number;
   surface_terrain: number;
   prix: number;
-  natures: string[];
-  parcelles: string[];
   adresse_nom_voie: string | null;
   excludedFromCalc: boolean;
 }

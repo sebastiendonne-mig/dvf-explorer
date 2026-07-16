@@ -32,6 +32,9 @@ export function parseCSV(text: string): Record<string, string>[] {
 // convient pas ici : limite ~2 Mo par entrée, dépassée par les grandes communes.
 const CSV_TTL_MS = 15 * 60 * 1000;
 const CSV_CACHE_MAX = 12;
+// Un socket qui pend vers files.data.gouv.fr bloquerait la lambda jusqu'au
+// 504 (cause du timeout du 16/07) : on borne chaque téléchargement.
+const CSV_FETCH_TIMEOUT_MS = 10_000;
 const csvCache = new Map<string, { rows: Record<string, string>[]; at: number }>();
 
 async function fetchYearRows(urlDept: string, insee: string, year: number): Promise<Record<string, string>[]> {
@@ -40,7 +43,20 @@ async function fetchYearRows(urlDept: string, insee: string, year: number): Prom
   if (hit && Date.now() - hit.at < CSV_TTL_MS) return hit.rows;
 
   const url = `${BASE}/${year}/communes/${urlDept}/${insee}.csv`;
-  const res = await fetch(url, { headers: { Accept: 'text/csv,*/*' } });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Accept: 'text/csv,*/*' },
+      signal: AbortSignal.timeout(CSV_FETCH_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    throw new Error(
+      timedOut
+        ? `Le service de données DGFiP ne répond pas (${insee}, ${year}). Réessayez dans quelques instants.`
+        : `Téléchargement DVF échoué (${insee}, ${year}).`
+    );
+  }
   if (!res.ok) return [];
   const text = await res.text();
   if (text.trimStart().startsWith('<?xml')) return [];

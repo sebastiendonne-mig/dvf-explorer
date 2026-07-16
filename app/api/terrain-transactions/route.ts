@@ -28,7 +28,7 @@ export async function GET(req: Request) {
     const transactions = sales
       .filter(s => s.category === category)
       .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
-      .map(({ year, category: _cat, unit, ...t }) => t);
+      .map(({ year, category: _cat, unit, natures, parcelles, ...t }) => t);
 
     return Response.json({ count: transactions.length, transactions });
   } catch (error) {
