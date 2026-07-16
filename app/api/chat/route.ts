@@ -6,7 +6,7 @@ import {
   extractDepartmentFromInsee,
   isDepartmentExcluded
 } from '@/lib/sanitize';
-import { TERRAIN_MARKER, priceUnitFor } from '@/lib/terrain';
+import { TERRAIN_MARKER, priceUnitFor, MIN_VALEUR_CALC, MIN_SURFACE_CALC } from '@/lib/terrain';
 
 export const maxDuration = 60;
 
@@ -338,6 +338,7 @@ export async function POST(req: Request) {
                 natures: string[];
                 parcelles: string[];
                 adresse_nom_voie: string | null;
+                excludedFromCalc: boolean;
               };
               const sales: Sale[] = [];
               const allCategories = new Set<string>();
@@ -387,6 +388,9 @@ export async function POST(req: Request) {
                   natures,
                   parcelles: [...parcelles],
                   adresse_nom_voie: rows.find(r => r.adresse_nom_voie)?.adresse_nom_voie ?? null,
+                  // Toujours affichée, mais exclue des médianes/fourchettes :
+                  // valeur symbolique ou surface quasi nulle
+                  excludedFromCalc: valeur <= MIN_VALEUR_CALC || totalSurface <= MIN_SURFACE_CALC,
                 });
               }
 
@@ -411,16 +415,20 @@ export async function POST(req: Request) {
               const byCategory = [...groups.values()]
                 .sort((a, b) => a.category.localeCompare(b.category) || b.year.localeCompare(a.year))
                 .map(g => {
-                  const prices = g.sales.map(s => s.prix);
+                  // Stats sur les seules ventes significatives ; le compte
+                  // total et la liste affichée restent exhaustifs
+                  const calcSales = g.sales.filter(s => !s.excludedFromCalc);
+                  const prices = calcSales.map(s => s.prix);
                   return {
                     category: g.category,
                     year: g.year,
                     unit: g.sales[0].unit,
                     count: g.sales.length,
-                    reliable: g.sales.length >= MIN_SAMPLE_RELIABLE,
-                    medianPrice: Math.round(median(prices) * 100) / 100,
-                    minPrice: Math.min(...prices),
-                    maxPrice: Math.max(...prices),
+                    calcCount: calcSales.length,
+                    reliable: calcSales.length >= MIN_SAMPLE_RELIABLE,
+                    medianPrice: prices.length > 0 ? Math.round(median(prices) * 100) / 100 : null,
+                    minPrice: prices.length > 0 ? Math.min(...prices) : null,
+                    maxPrice: prices.length > 0 ? Math.max(...prices) : null,
                     medianSurface: Math.round(median(g.sales.map(s => s.surface_terrain))),
                     transactions: g.sales
                       .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())

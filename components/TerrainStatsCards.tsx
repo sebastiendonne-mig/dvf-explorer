@@ -27,7 +27,8 @@ const CARD: React.CSSProperties = {
 };
 
 function priceLabel(g: TerrainGroup): string {
-  if (g.reliable || g.count === 1) return `${fmtPrix(g.medianPrice)} ${g.unit}`;
+  if (g.medianPrice === null || g.minPrice === null || g.maxPrice === null) return '—';
+  if (g.reliable || g.calcCount === 1) return `${fmtPrix(g.medianPrice)} ${g.unit}`;
   return `${fmtPrix(g.minPrice)}–${fmtPrix(g.maxPrice)} ${g.unit}`;
 }
 
@@ -49,6 +50,9 @@ function TransactionList({ transactions, unit }: { transactions: TerrainTransact
           {' · '}{fmtEuros(t.valeur_fonciere)} €
           {' · '}<span style={{ color: 'var(--gray-700)' }}>{fmtPrix(t.prix)} {unit}</span>
           {t.adresse_nom_voie ? ` · ${t.adresse_nom_voie}` : ''}
+          {t.excludedFromCalc && (
+            <span style={{ color: 'var(--gray-400)', fontStyle: 'italic' }}> · hors calcul, valeur atypique</span>
+          )}
         </li>
       ))}
     </ul>
@@ -57,9 +61,9 @@ function TransactionList({ transactions, unit }: { transactions: TerrainTransact
 
 function CategoryCard({ category, groups }: { category: string; groups: TerrainGroup[] }) {
   // Groupes déjà triés par année décroissante par l'API
-  const headline = groups.find(g => g.reliable) ?? groups[0];
+  const headline = groups.find(g => g.reliable) ?? groups.find(g => g.calcCount > 0) ?? groups[0];
   const unit = groups[0].unit;
-  const maxMedian = Math.max(...groups.map(g => g.medianPrice), 1);
+  const maxMedian = Math.max(...groups.map(g => g.medianPrice ?? 0), 1);
   const transactions = groups
     .flatMap(g => g.transactions)
     .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
@@ -77,7 +81,10 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
           {priceLabel(headline)}
         </span>
         <span style={{ fontSize: '13px', color: 'var(--gray-500)' }}>
-          {headline.reliable ? 'médiane' : 'fourchette'} {headline.year} · {totalVentes} vente{totalVentes > 1 ? 's' : ''} au total
+          {headline.medianPrice === null
+            ? 'ventes atypiques uniquement'
+            : headline.reliable ? `médiane ${headline.year}` : `fourchette ${headline.year}`}
+          {' · '}{totalVentes} vente{totalVentes > 1 ? 's' : ''} au total
         </span>
       </p>
 
@@ -90,21 +97,23 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
           >
             <span style={{ fontSize: '13px', color: 'var(--gray-500)' }}>{g.year}</span>
             <div style={{ height: '8px', backgroundColor: 'var(--gray-100)', borderRadius: '0 4px 4px 0' }}>
-              <div
-                style={{
-                  height: '100%',
-                  width: `${Math.max((g.medianPrice / maxMedian) * 100, 2)}%`,
-                  backgroundColor: BAR_COLOR,
-                  opacity: g.reliable ? 1 : 0.35,
-                  borderRadius: '0 4px 4px 0',
-                }}
-              />
+              {g.medianPrice !== null && (
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${Math.max((g.medianPrice / maxMedian) * 100, 2)}%`,
+                    backgroundColor: BAR_COLOR,
+                    opacity: g.reliable ? 1 : 0.35,
+                    borderRadius: '0 4px 4px 0',
+                  }}
+                />
+              )}
             </div>
             <span style={{ fontSize: '13px', color: 'var(--gray-700)', textAlign: 'right' }}>
               {priceLabel(g)}
               <span style={{ color: 'var(--gray-400)' }}> · {g.count} vente{g.count > 1 ? 's' : ''}</span>
               {!g.reliable && (
-                <span style={{ color: 'var(--gray-400)' }} title="Moins de 5 ventes : à interpréter avec prudence"> ⚠</span>
+                <span style={{ color: 'var(--gray-400)' }} title="Moins de 5 ventes prises en compte dans le calcul : à interpréter avec prudence"> ⚠</span>
               )}
             </span>
           </div>
@@ -155,7 +164,9 @@ export function TerrainStatsCards({ stats }: { stats: TerrainStats }) {
       <p style={{ fontSize: '12.5px', color: 'var(--gray-400)', lineHeight: 1.55, margin: '14px 0 0' }}>
         Période {period} · Données DVF/DGFiP, mises à jour avec environ 6 mois de décalage ·
         Prix médians par vente (valeur totale ÷ surface totale), en €/m² pour les catégories urbaines et en €/ha
-        pour les catégories agricoles et forestières · ⚠ = moins de 5 ventes, à interpréter avec prudence.
+        pour les catégories agricoles et forestières · ⚠ = moins de 5 ventes prises en compte dans le calcul,
+        à interpréter avec prudence · « hors calcul, valeur atypique » = vente à valeur symbolique (≤ 10 €)
+        ou surface quasi nulle (≤ 20 m²), toujours listée mais exclue des médianes et fourchettes.
         {hasTerrainABatir && (
           <>
             <br />

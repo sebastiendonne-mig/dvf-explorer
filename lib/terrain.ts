@@ -24,6 +24,13 @@ export function priceUnitFor(category: string): PriceUnit {
   return M2_CATEGORIES.has(category) ? '€/m²' : '€/ha';
 }
 
+// Seuils d'exclusion du CALCUL (jamais de l'affichage) : ventes à valeur
+// symbolique (donations/successions passées en "Vente" à 1 €) et surfaces
+// quasi nulles qui font exploser le prix unitaire. Volontairement bas pour
+// ne pas écarter de vraies petites transactions.
+export const MIN_VALEUR_CALC = 10; // €
+export const MIN_SURFACE_CALC = 20; // m²
+
 export interface TerrainTransaction {
   date_mutation: string;
   valeur_fonciere: number;
@@ -32,17 +39,19 @@ export interface TerrainTransaction {
   natures: string[];
   parcelles: string[];
   adresse_nom_voie: string | null;
+  excludedFromCalc: boolean;
 }
 
 export interface TerrainGroup {
   category: string;
   year: string;
   unit: PriceUnit;
-  count: number;
+  count: number; // toutes les ventes du groupe, y compris hors calcul
+  calcCount: number; // ventes prises en compte dans médiane/min/max
   reliable: boolean;
-  medianPrice: number;
-  minPrice: number;
-  maxPrice: number;
+  medianPrice: number | null; // null si aucune vente utilisable pour le calcul
+  minPrice: number | null;
+  maxPrice: number | null;
   medianSurface: number;
   transactions: TerrainTransaction[];
 }
