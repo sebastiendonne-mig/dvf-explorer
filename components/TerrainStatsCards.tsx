@@ -59,7 +59,7 @@ function TransactionList({ transactions, unit }: { transactions: TerrainTransact
   );
 }
 
-function CategoryCard({ category, groups }: { category: string; groups: TerrainGroup[] }) {
+function CategoryCard({ category, groups, insee }: { category: string; groups: TerrainGroup[]; insee?: string }) {
   // Groupes déjà triés par année décroissante par l'API
   const headline = groups.find(g => g.reliable) ?? groups.find(g => g.calcCount > 0) ?? groups[0];
   const unit = groups[0].unit;
@@ -69,6 +69,35 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
     .sort((a, b) => new Date(b.date_mutation).getTime() - new Date(a.date_mutation).getTime())
     .slice(0, 10);
   const totalVentes = groups.reduce((sum, g) => sum + g.count, 0);
+
+  // Liste complète, chargée à la demande via /api/terrain-transactions
+  // (le chat ne transmet que 10 transactions par groupe au modèle)
+  const [fullTx, setFullTx] = React.useState<TerrainTransaction[] | null>(null);
+  const [loadingFull, setLoadingFull] = React.useState(false);
+  const [errorFull, setErrorFull] = React.useState(false);
+
+  async function loadFull() {
+    if (!insee || loadingFull) return;
+    setLoadingFull(true);
+    setErrorFull(false);
+    try {
+      const years = groups.map(g => Number(g.year));
+      const params = new URLSearchParams({
+        insee,
+        category,
+        yearFrom: String(Math.min(...years)),
+        yearTo: String(Math.max(...years)),
+      });
+      const res = await fetch(`/api/terrain-transactions?${params}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const data = await res.json();
+      setFullTx(data.transactions as TerrainTransaction[]);
+    } catch {
+      setErrorFull(true);
+    } finally {
+      setLoadingFull(false);
+    }
+  }
 
   return (
     <div style={CARD}>
@@ -123,9 +152,37 @@ function CategoryCard({ category, groups }: { category: string; groups: TerrainG
       {transactions.length > 0 && (
         <details style={{ marginTop: '14px' }}>
           <summary style={{ fontSize: '13px', color: 'var(--gray-500)', cursor: 'pointer' }}>
-            Voir les {transactions.length} dernières transactions
+            {fullTx
+              ? `Les ${fullTx.length} transactions`
+              : totalVentes > transactions.length
+                ? `Voir les ${transactions.length} dernières transactions (sur ${totalVentes})`
+                : `Voir les ${transactions.length} transactions`}
           </summary>
-          <TransactionList transactions={transactions} unit={unit} />
+          <TransactionList transactions={fullTx ?? transactions} unit={unit} />
+          {insee && !fullTx && totalVentes > transactions.length && (
+            <p style={{ margin: '8px 0 0' }}>
+              <button
+                onClick={loadFull}
+                disabled={loadingFull}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  fontSize: '13px',
+                  color: BAR_COLOR,
+                  cursor: loadingFull ? 'wait' : 'pointer',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
+                }}
+              >
+                {loadingFull ? 'Chargement…' : `Voir toutes les transactions (${totalVentes})`}
+              </button>
+              {errorFull && (
+                <span style={{ fontSize: '13px', color: 'var(--gray-400)' }}> — échec du chargement, cliquez pour réessayer</span>
+              )}
+            </p>
+          )}
         </details>
       )}
     </div>
@@ -158,7 +215,7 @@ export function TerrainStatsCards({ stats }: { stats: TerrainStats }) {
   return (
     <div style={{ marginTop: '16px' }}>
       {cards.map(([category, groups]) => (
-        <CategoryCard key={category} category={category} groups={groups} />
+        <CategoryCard key={category} category={category} groups={groups} insee={stats.insee} />
       ))}
 
       <p style={{ fontSize: '12.5px', color: 'var(--gray-400)', lineHeight: 1.55, margin: '14px 0 0' }}>

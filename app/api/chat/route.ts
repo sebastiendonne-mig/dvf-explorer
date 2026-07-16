@@ -6,23 +6,10 @@ import {
   extractDepartmentFromInsee,
   isDepartmentExcluded
 } from '@/lib/sanitize';
-import { TERRAIN_MARKER, priceUnitFor, MIN_VALEUR_CALC, MIN_SURFACE_CALC } from '@/lib/terrain';
+import { TERRAIN_MARKER } from '@/lib/terrain';
+import { parseCSV, fetchTerrainSales, clampYears, median, type TerrainSale } from '@/lib/terrain-data';
 
 export const maxDuration = 60;
-
-// Shared between fetch_dvf_data and fetch_terrain_stats_commune.
-// Naive comma split: geo-dvf CSVs contain no quoted fields (verified on real files).
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim());
-  return lines.slice(1).map(line => {
-    const values = line.split(',');
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = (values[i] ?? '').trim(); });
-    return row;
-  });
-}
 
 const systemPrompt = `Tu es un agent DVF. RÈGLE ABSOLUE : n'écris AUCUN texte avant d'avoir exécuté les outils nécessaires — appelle-les directement.
 
@@ -285,116 +272,15 @@ export async function POST(req: Request) {
           execute: async ({ insee, dept, yearFrom, yearTo, category }: {
             insee: string; dept: string; yearFrom?: number; yearTo?: number; category?: string | null;
           }) => {
-            // Overseas departments (971–974) need 3-char dept in URL path
-            const urlDept = insee.startsWith('97') ? insee.substring(0, 3) : dept;
-            const BASE = 'https://files.data.gouv.fr/geo-dvf/2025-12/csv';
-            const startYear = Math.max(yearFrom ?? 2021, 2014);
-            const endYear = Math.min(yearTo ?? 2025, 2025);
-            const years = Array.from(
-              { length: Math.max(endYear - startYear + 1, 0) },
-              (_, i) => startYear + i
-            );
-
-            async function fetchYear(year: number): Promise<Record<string, string>[]> {
-              const url = `${BASE}/${year}/communes/${urlDept}/${insee}.csv`;
-              const res = await fetch(url, { headers: { Accept: 'text/csv,*/*' } });
-              if (!res.ok) return [];
-              const text = await res.text();
-              if (text.trimStart().startsWith('<?xml')) return [];
-              return parseCSV(text);
-            }
-
-            function median(arr: number[]): number {
-              const sorted = [...arr].sort((a, b) => a - b);
-              const mid = Math.floor(sorted.length / 2);
-              return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-            }
-
+            const { startYear, endYear } = clampYears(yearFrom, yearTo);
             const MIN_SAMPLE_RELIABLE = 5;
             const MAX_TRANSACTIONS_PER_GROUP = 10;
 
             try {
-              const allRows = (await Promise.all(years.map(fetchYear))).flat();
+              // Logique partagée avec /api/terrain-transactions (lib/terrain-data)
+              const sales = await fetchTerrainSales({ insee, dept, startYear, endYear });
 
-              // valeur_fonciere is the TOTAL price of the whole mutation, repeated
-              // on every row, and a house sale also carries bare type_local rows
-              // for its land. Stats must therefore be computed per mutation:
-              // keep only sales where no row has a type_local at all.
-              const byMutation = new Map<string, Record<string, string>[]>();
-              for (const r of allRows) {
-                if (r.nature_mutation !== 'Vente') continue;
-                const rows = byMutation.get(r.id_mutation);
-                if (rows) rows.push(r); else byMutation.set(r.id_mutation, [r]);
-              }
-
-              type Sale = {
-                date_mutation: string;
-                year: string;
-                valeur_fonciere: number;
-                surface_terrain: number;
-                prix: number;
-                unit: ReturnType<typeof priceUnitFor>;
-                category: string;
-                natures: string[];
-                parcelles: string[];
-                adresse_nom_voie: string | null;
-                excludedFromCalc: boolean;
-              };
-              const sales: Sale[] = [];
-              const allCategories = new Set<string>();
-
-              for (const rows of byMutation.values()) {
-                if (rows.some(r => r.type_local && r.type_local.trim() !== '')) continue;
-                const valeur = parseFloat(rows[0].valeur_fonciere);
-                if (!(valeur > 0)) continue;
-
-                // A parcelle can appear once per subdivision fiscale, and the same
-                // subdivision can repeat across dispositions: dedup on the full triplet.
-                const seen = new Set<string>();
-                const surfaceByNature = new Map<string, number>();
-                const parcelles = new Set<string>();
-                let totalSurface = 0;
-                for (const r of rows) {
-                  const surface = parseFloat(r.surface_terrain);
-                  if (!(surface > 0)) continue;
-                  const key = `${r.id_parcelle}|${r.nature_culture}|${r.surface_terrain}`;
-                  if (seen.has(key)) continue;
-                  seen.add(key);
-                  totalSurface += surface;
-                  const nature = r.nature_culture || 'Non renseigné';
-                  surfaceByNature.set(nature, (surfaceByNature.get(nature) ?? 0) + surface);
-                  parcelles.add(r.id_parcelle);
-                }
-                if (totalSurface <= 0) continue;
-
-                const natures = [...surfaceByNature.entries()]
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([nature]) => nature);
-                natures.forEach(n => allCategories.add(n));
-
-                // Unité selon la catégorie dominante : €/m² en urbain,
-                // €/ha en rural (même calcul, diviseur en hectares)
-                const unit = priceUnitFor(natures[0]);
-                const divisor = unit === '€/ha' ? totalSurface / 10000 : totalSurface;
-
-                sales.push({
-                  date_mutation: rows[0].date_mutation,
-                  year: (rows[0].date_mutation ?? '').slice(0, 4),
-                  valeur_fonciere: valeur,
-                  surface_terrain: totalSurface,
-                  prix: Math.round((valeur / divisor) * 100) / 100,
-                  unit,
-                  category: natures[0], // dominant nature_culture by surface
-                  natures,
-                  parcelles: [...parcelles],
-                  adresse_nom_voie: rows.find(r => r.adresse_nom_voie)?.adresse_nom_voie ?? null,
-                  // Toujours affichée, mais exclue des médianes/fourchettes :
-                  // valeur symbolique ou surface quasi nulle
-                  excludedFromCalc: valeur <= MIN_VALEUR_CALC || totalSurface <= MIN_SURFACE_CALC,
-                });
-              }
-
-              const availableCategories = [...allCategories].sort();
+              const availableCategories = [...new Set(sales.flatMap(s => s.natures))].sort();
               const filtered = category ? sales.filter(s => s.category === category) : sales;
 
               if (filtered.length === 0) {
@@ -402,7 +288,7 @@ export async function POST(req: Request) {
               }
 
               // Group by dominant category + year
-              type Group = { category: string; year: string; sales: Sale[] };
+              type Group = { category: string; year: string; sales: TerrainSale[] };
               const groups = new Map<string, Group>();
               for (const s of filtered) {
                 const key = `${s.category}__${s.year}`;
@@ -464,7 +350,13 @@ export async function POST(req: Request) {
             .flatMap(s => s.toolResults)
             .find(r => r.toolName === 'fetch_terrain_stats_commune');
           if (terrain) {
-            controller.enqueue(encoder.encode('\n' + TERRAIN_MARKER + JSON.stringify(terrain.output)));
+            // insee ajouté pour que le composant puisse appeler
+            // /api/terrain-transactions (liste complète d'un groupe)
+            const payload = {
+              ...(terrain.output as object),
+              insee: (terrain.input as { insee?: string }).insee,
+            };
+            controller.enqueue(encoder.encode('\n' + TERRAIN_MARKER + JSON.stringify(payload)));
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : '';

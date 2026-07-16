@@ -60,6 +60,9 @@ export interface TerrainStats {
   count: number;
   availableCategories: string[];
   byCategory: TerrainGroup[];
+  // Ajouté au payload par la route chat (absent des anciens messages) :
+  // permet au composant d'appeler /api/terrain-transactions
+  insee?: string;
 }
 
 // Arrondi affichage : entier si ≥ 10, 2 décimales sinon (virgule française)
