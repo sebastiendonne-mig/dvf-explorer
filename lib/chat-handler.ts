@@ -14,6 +14,7 @@ import { parseCSV, fetchTerrainSales, clampYears, median, type TerrainSale } fro
 import { errorLogFields, errorName, type Logger } from '@/lib/log';
 import { INVALID_REQUEST_TEXT, parseChatRequest } from '@/lib/chat-request';
 import { MAX_OUTPUT_TOKENS } from '@/lib/chat-limits';
+import { errorText } from '@/lib/chat-errors';
 
 export type ChatDeps = {
   model: LanguageModel;
@@ -78,6 +79,12 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
     }
     const { messages } = request;
 
+    // Erreur vue par onError. textStream ne transmet que le texte : une erreur
+    // du fournisseur (y compris au 2e pas, après un 1er pas réussi) n'arrive
+    // jamais dans la boucle for-await. Sans cette capture, le flux se termine
+    // tronqué ou vide, sans message.
+    let streamError: unknown = undefined;
+
     const result = streamText({
       model: deps.model,
       system: systemPrompt,
@@ -103,6 +110,7 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
       // pour une APICallError, cela imprime requestBodyValues (messages des
       // visiteurs) et responseBody. Ici : nom, statut, réessayable, rien d'autre.
       onError: ({ error }) => {
+        streamError = error;
         deps.log('error', 'model_error', errorLogFields(error));
       },
       tools: {
@@ -379,19 +387,26 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
       }
     });
 
-    // Stream text with error interception: if Anthropic API is overloaded,
-    // send a readable error message instead of silently returning an empty stream.
+    // Ordre du flux, que le frontend suppose : texte du modèle, puis message
+    // d'erreur éventuel (texte fixe), puis marqueur terrain TOUJOURS en dernier
+    // (app/page.tsx lit le JSON jusqu'à la fin du texte).
     const encoder = new TextEncoder();
     const body = new ReadableStream({
       async start(controller) {
+        let sentText = false;
+        const sendError = (error: unknown) => {
+          controller.enqueue(encoder.encode((sentText ? '\n\n' : '') + errorText(error)));
+        };
         try {
           for await (const chunk of result.textStream) {
+            if (chunk) sentText = true;
             controller.enqueue(encoder.encode(chunk));
           }
+          const steps = await result.steps;
+          if (streamError !== undefined) sendError(streamError);
           // Après le texte : si le tool terrain a été appelé, on ajoute son
           // résultat JSON derrière un marqueur — le frontend le retire du
           // texte affiché et le passe au composant TerrainStatsCards.
-          const steps = await result.steps;
           const terrain = steps
             .flatMap(s => s.toolResults)
             .find(r => r.toolName === 'fetch_terrain_stats_commune');
@@ -406,16 +421,9 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
           }
         } catch (err) {
           deps.log('error', 'chat_stream_error', errorLogFields(err));
-          const msg = err instanceof Error ? err.message : '';
-          const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
-          const isOverload = msg.includes('RetryError') || msg.includes('overload') || msg.includes('529') || msg.includes('rate');
-          controller.enqueue(encoder.encode(
-            isTimeout
-              ? '⚠️ La réponse a pris trop de temps. Réessayez dans quelques instants.'
-              : isOverload
-                ? '⚠️ Service temporairement surchargé. Réessayez dans quelques instants.'
-                : '⚠️ Une erreur est survenue. Réessayez.'
-          ));
+          // L'erreur d'origine (vue par onError) est plus parlante que le
+          // NoOutputGeneratedError que lève result.steps quand aucun pas n'a abouti.
+          sendError(streamError ?? err);
         } finally {
           controller.close();
         }
