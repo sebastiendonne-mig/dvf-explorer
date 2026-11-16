@@ -13,6 +13,7 @@ import { TERRAIN_MARKER } from '@/lib/terrain';
 import { parseCSV, fetchTerrainSales, clampYears, median, type TerrainSale } from '@/lib/terrain-data';
 import type { Logger } from '@/lib/log';
 import { INVALID_REQUEST_TEXT, parseChatRequest } from '@/lib/chat-request';
+import { MAX_OUTPUT_TOKENS } from '@/lib/chat-limits';
 
 export type ChatDeps = {
   model: LanguageModel;
@@ -82,6 +83,18 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
       system: systemPrompt,
       messages,
       stopWhen: stepCountIs(5),
+      // Borne de sortie PAR PAS (le SDK la repasse à chaque appel du modèle)
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      // Fin de génération : raison et volumes seulement, jamais de contenu.
+      // 'length' = réponse coupée par MAX_OUTPUT_TOKENS : à surveiller.
+      onFinish: ({ finishReason, steps, totalUsage }) => {
+        deps.log(finishReason === 'length' ? 'warn' : 'info', 'chat_finish', {
+          finishReason,
+          steps: steps.length,
+          inputTokens: totalUsage.inputTokens,
+          outputTokens: totalUsage.outputTokens,
+        });
+      },
       // Borné sous le maxDuration (60 s) : mieux vaut un message d'erreur
       // propre qu'un 504 brut quand l'API Anthropic traîne (cause du 16/07)
       maxRetries: 1,
