@@ -11,7 +11,7 @@ import {
 } from '@/lib/sanitize';
 import { TERRAIN_MARKER } from '@/lib/terrain';
 import { parseCSV, fetchTerrainSales, clampYears, median, type TerrainSale } from '@/lib/terrain-data';
-import type { Logger } from '@/lib/log';
+import { errorLogFields, errorName, type Logger } from '@/lib/log';
 import { INVALID_REQUEST_TEXT, parseChatRequest } from '@/lib/chat-request';
 import { MAX_OUTPUT_TOKENS } from '@/lib/chat-limits';
 
@@ -99,6 +99,12 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
       // propre qu'un 504 brut quand l'API Anthropic traîne (cause du 16/07)
       maxRetries: 1,
       abortSignal: AbortSignal.timeout(45_000),
+      // Remplace le onError par défaut du SDK, qui fait console.error(error) :
+      // pour une APICallError, cela imprime requestBodyValues (messages des
+      // visiteurs) et responseBody. Ici : nom, statut, réessayable, rien d'autre.
+      onError: ({ error }) => {
+        deps.log('error', 'model_error', errorLogFields(error));
+      },
       tools: {
         geocode_address: tool({
           description:
@@ -399,6 +405,7 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
             controller.enqueue(encoder.encode('\n' + TERRAIN_MARKER + JSON.stringify(payload)));
           }
         } catch (err) {
+          deps.log('error', 'chat_stream_error', errorLogFields(err));
           const msg = err instanceof Error ? err.message : '';
           const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
           const isOverload = msg.includes('RetryError') || msg.includes('overload') || msg.includes('529') || msg.includes('rate');
@@ -419,7 +426,7 @@ export async function handleChat(req: Request, deps: ChatDeps): Promise<Response
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });
   } catch (error) {
-    console.error('API route error:', error);
+    deps.log('error', 'chat_route_error', { name: errorName(error) });
     return new Response('⚠️ Erreur serveur. Réessayez.', { status: 500 });
   }
 }
