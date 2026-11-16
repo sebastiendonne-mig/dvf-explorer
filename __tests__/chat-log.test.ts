@@ -47,6 +47,17 @@ describe('lib/log', () => {
     expect(JSON.stringify(fields)).not.toContain(TEMOIN);
   });
 
+  it('errorLogFields : providerType seulement dans la table fermée, sinon "unknown"', () => {
+    expect(errorLogFields({ type: 'overloaded_error', message: TEMOIN })).toMatchObject({ name: 'object', providerType: 'overloaded_error' });
+    expect(errorLogFields({ type: TEMOIN, message: TEMOIN })).toMatchObject({ providerType: 'unknown' });
+    expect(errorLogFields(TEMOIN)).toMatchObject({ name: 'string', providerType: 'unknown' });
+    expect(errorLogFields(null)).toMatchObject({ providerType: 'unknown' });
+    expect(errorLogFields(apiError(529)).providerType).toBeUndefined();
+    for (const e of [{ type: TEMOIN, message: TEMOIN }, TEMOIN, { type: 'overloaded_error', message: TEMOIN }]) {
+      expect(JSON.stringify(errorLogFields(e))).not.toContain(TEMOIN);
+    }
+  });
+
   it('errorLogFields déballe un RetryError (lastError)', () => {
     const wrapped = new RetryError({ message: TEMOIN, reason: 'maxRetriesExceeded', errors: [apiError(429, true), apiError(429, true)] });
     const fields = errorLogFields(wrapped);

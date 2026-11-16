@@ -105,6 +105,64 @@ describe('erreur en milieu de flux (partie error après du texte)', () => {
     expect(text).not.toContain(SENTINELLE);
   });
 
+  /** Ligne model_error du vrai journal, relue depuis la console espionnée. */
+  function modelErrorLine(dump: string): Record<string, unknown> {
+    const line = dump.split('\n').find((l) => l.includes('"event":"model_error"'));
+    expect(line).toBeDefined();
+    // inspect entoure la chaîne de quotes simples : on les retire avant JSON.parse
+    return JSON.parse(line!.replace(/^'|'$/g, '')) as Record<string, unknown>;
+  }
+
+  it('overloaded_error brut : message « surchargé », type journalisé, sentinelle absente', async () => {
+    const { text, dump } = await run([
+      midStreamErrorStep({ type: 'overloaded_error', message: `${SENTINELLE} Overloaded` }),
+    ]);
+    expect(text).toBe(`${TEXTE}\n\n${ERROR_TEXTS.overloaded}`);
+    expect(modelErrorLine(dump)).toMatchObject({ name: 'object', providerType: 'overloaded_error' });
+    expect(dump).not.toContain(SENTINELLE);
+    expect(text).not.toContain(SENTINELLE);
+  });
+
+  it('rate_limit_error brut : message « surchargé », type journalisé, sentinelle absente', async () => {
+    const { text, dump } = await run([
+      midStreamErrorStep({ type: 'rate_limit_error', message: `${SENTINELLE} Rate limited` }),
+    ]);
+    expect(text).toBe(`${TEXTE}\n\n${ERROR_TEXTS.overloaded}`);
+    expect(modelErrorLine(dump)).toMatchObject({ providerType: 'rate_limit_error' });
+    expect(dump).not.toContain(SENTINELLE);
+    expect(text).not.toContain(SENTINELLE);
+  });
+
+  it('type inconnu : générique, journal "unknown", la chaîne inconnue absente des journaux', async () => {
+    const TYPE_INCONNU = 'type-inconnu-temoin';
+    const { text, dump } = await run([
+      midStreamErrorStep({ type: TYPE_INCONNU, message: `${SENTINELLE} ?` }),
+    ]);
+    expect(text).toBe(`${TEXTE}\n\n${ERROR_TEXTS.generic}`);
+    expect(modelErrorLine(dump)).toMatchObject({ providerType: 'unknown' });
+    expect(dump).not.toContain(TYPE_INCONNU);
+    expect(dump).not.toContain(SENTINELLE);
+    expect(text).not.toContain(TYPE_INCONNU);
+    expect(text).not.toContain(SENTINELLE);
+  });
+
+  it('chaîne simple comme erreur : aucune exception, générique, chaîne absente des journaux', async () => {
+    const { res, text, dump } = await run([midStreamErrorStep(`${SENTINELLE} erreur en chaîne`)]);
+    expect(res.status).toBe(200);
+    expect(text).toBe(`${TEXTE}\n\n${ERROR_TEXTS.generic}`);
+    expect(modelErrorLine(dump)).toMatchObject({ name: 'string', providerType: 'unknown' });
+    expect(dump).not.toContain(SENTINELLE);
+    expect(text).not.toContain(SENTINELLE);
+  });
+
+  it('null comme erreur : aucune exception, générique', async () => {
+    const { res, text, dump } = await run([midStreamErrorStep(null)]);
+    expect(res.status).toBe(200);
+    expect(text).toBe(`${TEXTE}\n\n${ERROR_TEXTS.generic}`);
+    expect(modelErrorLine(dump)).toMatchObject({ providerType: 'unknown' });
+    expect(dump).not.toContain(SENTINELLE);
+  });
+
   it("aucun appel réseau", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });

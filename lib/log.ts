@@ -6,6 +6,7 @@
 // de message ni de corps renvoyé par un fournisseur.
 
 import { APICallError, RetryError } from 'ai';
+import { providerErrorType } from '@/lib/chat-errors';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 export type LogValue = string | number | boolean | null | undefined;
@@ -29,6 +30,10 @@ export function errorName(error: unknown): string {
  * réessayable. Un RetryError est déballé (lastError). Jamais `message`
  * (texte du fournisseur), `responseBody`, `requestBodyValues` (contient les
  * messages des visiteurs) ni l'objet erreur lui-même.
+ *
+ * Erreur qui n'est pas une Error (objet brut du fournisseur, chaîne, null) :
+ * `providerType` vaut le type s'il est dans la table fermée de chat-errors,
+ * sinon "unknown". Jamais une chaîne libre venue du fournisseur.
  */
 export function errorLogFields(error: unknown): LogFields {
   const inner = RetryError.isInstance(error) ? error.lastError : error;
@@ -39,5 +44,6 @@ export function errorLogFields(error: unknown): LogFields {
     innerName: inner !== error ? errorName(inner) : undefined,
     statusCode: api?.statusCode,
     isRetryable: api?.isRetryable,
+    providerType: inner instanceof Error ? undefined : (providerErrorType(inner) ?? 'unknown'),
   };
 }

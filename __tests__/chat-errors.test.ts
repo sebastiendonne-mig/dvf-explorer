@@ -2,7 +2,7 @@ import './helpers/hermetic';
 import { APICallError, RetryError } from 'ai';
 import { describe, expect, it } from 'vitest';
 import { VALID_BODY, runChat } from './helpers/chat';
-import { ERROR_TEXTS, classifyError, errorText } from '@/lib/chat-errors';
+import { ERROR_TEXTS, PROVIDER_ERROR_STATUS, classifyError, errorText, providerErrorType } from '@/lib/chat-errors';
 
 function apiError(statusCode: number | undefined, isRetryable = false) {
   return new APICallError({
@@ -53,6 +53,41 @@ describe('classifyError — table statusCode → message', () => {
     expect(classifyError(new Error('overload 529 rate'))).toBe('generic'); // le texte n'est plus lu
     expect(classifyError('chaîne')).toBe('generic');
     expect(classifyError(undefined)).toBe('generic');
+  });
+
+  it.each([
+    ['invalid_request_error', 'unavailable'],
+    ['authentication_error', 'unavailable'],
+    ['permission_error', 'unavailable'],
+    ['not_found_error', 'unavailable'],
+    ['request_too_large', 'unavailable'],
+    ['rate_limit_error', 'overloaded'],
+    ['api_error', 'overloaded'],
+    ['overloaded_error', 'overloaded'],
+  ] as const)('objet brut { type: %s } → %s (via le code HTTP équivalent)', (type, kind) => {
+    expect(classifyError({ type, message: 'texte fournisseur' })).toBe(kind);
+  });
+
+  it('objet brut hors table fermée → générique', () => {
+    for (const e of [
+      { type: 'inconnu' }, { type: 529 }, { type: null }, {}, { message: 'overloaded' },
+      { type: 'toString' }, { type: '__proto__' }, { type: 'constructor' }, [],
+    ]) {
+      expect(classifyError(e)).toBe('generic');
+      expect(providerErrorType(e)).toBeUndefined();
+    }
+  });
+
+  it('une Error portant une propriété type ne passe pas par la table', () => {
+    const e = Object.assign(new Error('x'), { type: 'overloaded_error' });
+    expect(classifyError(e)).toBe('generic');
+  });
+
+  it('la table fermée est celle décidée', () => {
+    expect(PROVIDER_ERROR_STATUS).toEqual({
+      invalid_request_error: 400, authentication_error: 401, permission_error: 403, not_found_error: 404,
+      request_too_large: 413, rate_limit_error: 429, api_error: 500, overloaded_error: 529,
+    });
   });
 
   it('les textes visiteur sont ceux déjà en place', () => {
