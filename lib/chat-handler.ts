@@ -12,6 +12,7 @@ import {
 import { TERRAIN_MARKER } from '@/lib/terrain';
 import { parseCSV, fetchTerrainSales, clampYears, median, type TerrainSale } from '@/lib/terrain-data';
 import type { Logger } from '@/lib/log';
+import { INVALID_REQUEST_TEXT, parseChatRequest } from '@/lib/chat-request';
 
 export type ChatDeps = {
   model: LanguageModel;
@@ -64,7 +65,17 @@ INTERDIT : tableau, chiffres, résumé, commentaire — aucune autre ligne.`;
 
 export async function handleChat(req: Request, deps: ChatDeps): Promise<Response> {
   try {
-    const { messages } = await req.json();
+    const request = await parseChatRequest(req);
+    if (!request.ok) {
+      deps.log('warn', 'request_rejected', {
+        rule: request.rule, field: request.field, code: request.code, status: request.status,
+      });
+      return new Response(INVALID_REQUEST_TEXT, {
+        status: request.status,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+    const { messages } = request;
 
     const result = streamText({
       model: deps.model,
