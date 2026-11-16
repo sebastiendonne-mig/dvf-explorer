@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, vi } from 'vitest';
 
 delete process.env.ANTHROPIC_API_KEY;
 
-export const fetchSpy = vi.fn(async (..._args: unknown[]): Promise<Response> => {
+export const fetchSpy = vi.fn(async (): Promise<Response> => {
   throw new Error('fetch interdit dans les tests hermétiques');
 });
 
