@@ -1,5 +1,6 @@
 import { extractDepartmentFromInsee, isDepartmentExcluded } from '@/lib/sanitize';
 import { fetchTerrainSales, clampYears } from '@/lib/terrain-data';
+import { errorName, log } from '@/lib/log';
 
 export const maxDuration = 30;
 
@@ -32,7 +33,8 @@ export async function GET(req: Request) {
 
     return Response.json({ count: transactions.length, transactions });
   } catch (error) {
-    console.error('terrain-transactions error:', error);
+    // Nom de l'erreur seulement : jamais l'objet, son message ni l'URL appelée
+    log('error', 'terrain_transactions_error', { name: errorName(error) });
     return Response.json({ error: 'Récupération des transactions échouée' }, { status: 500 });
   }
 }
